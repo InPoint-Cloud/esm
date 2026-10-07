@@ -22,7 +22,6 @@ import (
 	"encoding/json"
 	"fmt"
 	log "github.com/cihub/seelog"
-	"github.com/parnurzeal/gorequest"
 	"io"
 	"net/http"
 	"net/url"
@@ -30,36 +29,33 @@ import (
 	"sync"
 )
 
+// Get sends a GET request and returns the response with its body, the body is returned for any status code
 func Get(url string, auth *Auth, proxy string) (*http.Response, string, []error) {
-
-	request := gorequest.New()
-
-	tr := &http.Transport{
-		DisableKeepAlives:  true,
-		DisableCompression: false,
-		TLSClientConfig:    &tls.Config{InsecureSkipVerify: true},
+	client, err := getClient(proxy)
+	if err != nil {
+		return nil, "", []error{err}
 	}
-	request.Transport = tr
-
-	//request.Type("application/json")
-
-	if len(proxy) > 0 {
-		request.Proxy(proxy)
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return nil, "", []error{err}
 	}
-
-	// gorequest's Get() resets headers, so auth has to be set after it
-	request.Get(url)
 	if auth != nil {
 		if len(auth.ApiKey) > 0 {
-			request.Set("Authorization", "ApiKey "+auth.ApiKey)
+			req.Header.Set("Authorization", "ApiKey "+auth.ApiKey)
 		} else {
-			request.SetBasicAuth(auth.User, auth.Pass)
+			req.SetBasicAuth(auth.User, auth.Pass)
 		}
 	}
 
-	resp, body, errs := request.End()
-	return resp, body, errs
-
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, "", []error{err}
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return resp, "", []error{err}
+	}
+	return resp, string(body), nil
 }
 
 func newDeleteRequest(client *http.Client, method, urlStr string) (*http.Request, error) {

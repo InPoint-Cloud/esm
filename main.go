@@ -19,11 +19,11 @@ import (
 )
 
 func main() {
-	os.Exit(run())
+	os.Exit(run(os.Args[1:]))
 }
 
-// run does the migration and returns the exit code
-func run() int {
+// run does the migration with the given command line arguments and returns the exit code
+func run(args []string) int {
 	runtime.GOMAXPROCS(runtime.NumCPU())
 
 	go func() {
@@ -38,7 +38,7 @@ func run() int {
 		// register metrics handler
 		//mux.HandleFunc("/debug/vars", app.metricsHandler)
 
-		endpoint := http.ListenAndServe("0.0.0.0:6060", mux)
+		endpoint := http.ListenAndServe("127.0.0.1:6060", mux)
 		log.Debug("stop pprof server: %v", endpoint)
 	}()
 
@@ -48,7 +48,7 @@ func run() int {
 	migrator.Config = c
 
 	// parse args
-	_, err = goflags.Parse(c)
+	_, err = goflags.ParseArgs(c, args)
 	if err != nil {
 		if flagsErr, ok := err.(*goflags.Error); ok && flagsErr.Type == goflags.ErrHelp {
 			return 0

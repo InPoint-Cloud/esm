@@ -175,7 +175,7 @@ https://github.com/InPoint-Cloud/esm/releases
 if download version is not fill you environment,you may try to compile it yourself. `go` required.
 
 `go build -o esm .`
-* go version >= 1.21
+* go version >= 1.26
 
 ## Releasing
 Releases are built by GoReleaser in GitHub Actions (`.github/workflows/Release.yml`).

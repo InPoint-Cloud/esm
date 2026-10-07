@@ -26,6 +26,9 @@ jobs:
       - name: Vet
         run: go vet ./...
 
+      - name: Test
+        run: go test -race ./...
+
       # A manual run (no tag) builds a snapshot and keeps the binaries as a
       # workflow artifact; a tag push publishes a GitHub release.
       - name: Run GoReleaser
