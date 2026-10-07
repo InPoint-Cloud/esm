@@ -1,5 +1,8 @@
 name: Build Release
 
+permissions:
+  contents: read # access to check out code and install dependencies
+
 on:
   release:
     types: [published]
@@ -10,12 +13,12 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
     
     - name: Set up Go
-      uses: actions/setup-go@v4
+      uses: actions/setup-go@v7
       with:
-        go-version: '1.21'
+        go-version: stable
         # cache dependencies
         cache-dependency-path: go.sum
         
@@ -35,7 +38,7 @@ jobs:
         PROJ_ROOT: ${{ github.workspace }}
         
     - name: Upload a Build Artifact
-      uses: actions/upload-artifact@v4.3.3
+      uses: actions/upload-artifact@v7
       with:
         # Artifact name
         name: esm # optional, default is artifact
