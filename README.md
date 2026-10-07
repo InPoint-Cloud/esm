@@ -167,7 +167,7 @@ user buffer_count to control memory used by ESM， and use gzip to compress netw
 ```
 
 ## Download
-https://github.com/medcl/esm/releases
+https://github.com/InPoint-Cloud/esm/releases
 
 
 ## Compile:
