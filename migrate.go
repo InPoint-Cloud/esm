@@ -27,7 +27,7 @@ func (m *Migrator) runMigration() int {
 	}
 	defer m.restoreIndexSettings()
 
-	//至少输出一次
+	// output at least once
 	if c.RepeatOutputTimes < 1 {
 		c.RepeatOutputTimes = 1
 	} else {

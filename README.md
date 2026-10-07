@@ -1,45 +1,45 @@
 # An Elasticsearch Migration Tool
 
-Elasticsearch cross version data migration.
+Elasticsearch cross version data migration, from 1.x up to 9.x.
+This is a maintained fork of [medcl/esm](https://github.com/medcl/esm).
 
 Links:
 - [Dec 3rd, 2020: [EN] Cross version Elasticsearch data migration with ESM](https://discuss.elastic.co/t/dec-3rd-2020-en-cross-version-elasticsearch-data-migration-with-esm/256516)
-- [Use INFINI Gateway to check the Document-Level differences between two clusters or indices after the migration](https://gateway.infinilabs.com/docs/tutorial/index_diff/)
 
 ## Features:
 
 *  Cross version migration supported
-*  Overwrite index name
-*  Copy index settings and mapping
+*  Overwrite index name, merge several indexes into one
+*  Copy index settings and mappings
 *  Support http basic auth and api key auth
 *  Support migrating from 7.x to 8.x / 9.x (typeless target, settings and mappings are cleaned up automatically)
 *  Support dump index to local file
 *  Support loading index from local file
 *  Support http proxy
-*  Support sliced scroll ( elasticsearch 5.0 +)
-*  Support run in background
+*  Support sliced scroll (elasticsearch 5.0+)
 *  Generate testing data by randomize the source document id
-*  Support rename filed name
 *  Support unify document type name
-*  Support specify which _source fields to return from source
+*  Support specify which _source fields to return from source, or to skip
 *  Support specify query string query to filter the data source
-*  Support rename source fields while do bulk indexing
-*  Support incremental update(add/update/delete changed records) with `--sync`. Notice: it use different implementation, just handle the ***changed*** records, but not as fast as the old way
-*  Load generating with 
+*  Support incremental update (add/update/delete changed records) with `--sync`. Notice: it use different implementation, just handle the ***changed*** records, but not as fast as the old way
+*  Retries of failed requests and rejected documents, failed documents can be saved and re-imported
+*  Document counts of source and target are compared after the migration, the exit code is 1 if anything failed
+*  TLS certificates are verified, `--insecure` skips it for self-signed certificates
 
-## ESM is fast!
+## Performance
 
-A 3 nodes cluster(3 * c5d.4xlarge， 16C，32GB，10Gbps)
+ESM is fast, a 3 nodes cluster (3 * c5d.4xlarge, 16C, 32GB, 10Gbps) migrated 10,000,000 documents within a minute:
 
 ```
-root@ip-172-31-13-181:/tmp# ./esm -s https://localhost:8000 -d https://localhost:8000 -x logs1kw -y logs122 -m elastic:medcl123 -n elastic:medcl123 -w 40 --sliced_scroll_size=60 -b 5 --buffer_count=2000000  --regenerate_id
-[12-19 06:31:20] [INF] [main.go:506,main] start data migration..
-Scroll 10064570 / 10064570 [=================================================] 100.00% 55s
-Bulk 10062602 / 10064570 [==================================================]  99.98% 55s
-[12-19 06:32:15] [INF] [main.go:537,main] data migration finished.
+./esm -s https://localhost:8000 -d https://localhost:8000 -x logs1kw -y logs122 -m elastic:passwd -n elastic:passwd -w 40 --sliced_scroll_size=60 -b 5 --buffer_count=2000000 --regenerate_id
 ```
-Migrated 10,000,000 documents within a minute, Nginx log generated from kibana_sample_data_logs.
 
+The options that matter most:
+
+* `-w` the number of bulk workers writing to the target
+* `--sliced_scroll_size` the number of parallel scrolls reading from the source (5.x+)
+* `-c` the number of documents per scroll page, `-b` the bulk request size in MB
+* `--buffer_count` the number of documents buffered in memory between reading and writing
 
 ## Before ESM
 
@@ -62,67 +62,67 @@ PUT your-new-index
 copy index `index_name` from `192.168.1.x` to `192.168.1.y:9200`
 
 ```
-./bin/esm  -s http://192.168.1.x:9200   -d http://192.168.1.y:9200 -x index_name  -w=5 -b=10 -c 10000
+./esm  -s http://192.168.1.x:9200   -d http://192.168.1.y:9200 -x index_name  -w=5 -b=10 -c 10000
 ```
 
 copy index `src_index` from `192.168.1.x` to `192.168.1.y:9200` and save with `dest_index`
 
 ```
-./bin/esm -s http://localhost:9200 -d http://localhost:9200 -x src_index -y dest_index -w=5 -b=100
+./esm -s http://localhost:9200 -d http://localhost:9200 -x src_index -y dest_index -w=5 -b=100
 ```
 
 use sync feature for incremental update index `src_index` from `192.168.1.x` to `192.168.1.y:9200`
 ```
-./bin/esm --sync -s http://localhost:9200 -d http://localhost:9200 -x src_index -y dest_index
+./esm --sync -s http://localhost:9200 -d http://localhost:9200 -x src_index -y dest_index
 ```
 
 support Basic-Auth
 ```
-./bin/esm -s http://localhost:9200 -x "src_index" -y "dest_index"  -d http://localhost:9201 -n admin:111111
+./esm -s http://localhost:9200 -x "src_index" -y "dest_index"  -d http://localhost:9201 -n elastic:passwd
 ```
 
 copy settings and override shard size
 ```
-./bin/esm -s http://localhost:9200 -x "src_index" -y "dest_index"  -d http://localhost:9201 -m admin:111111 -c 10000 --shards=50  --copy_settings
+./esm -s http://localhost:9200 -x "src_index" -y "dest_index"  -d http://localhost:9201 -m elastic:passwd -c 10000 --shards=50  --copy_settings
 
 ```
 
 copy settings and mapping, recreate target index, add query to source fetch, refresh after migration
 ```
-./bin/esm -s http://localhost:9200 -x "src_index" -q=query:phone -y "dest_index"  -d http://localhost:9201  -c 10000 --shards=5  --copy_settings --copy_mappings --force  --refresh
+./esm -s http://localhost:9200 -x "src_index" -q=query:phone -y "dest_index"  -d http://localhost:9201  -c 10000 --shards=5  --copy_settings --copy_mappings --force  --refresh
 
 ```
 
 dump elasticsearch documents into local file
 ```
-./bin/esm -s http://localhost:9200 -x "src_index"  -m admin:111111 -c 5000 -q=query:mixer  --refresh -o=dump.bin 
+./esm -s http://localhost:9200 -x "src_index"  -m elastic:passwd -c 5000 -q=query:mixer  --refresh -o=dump.bin 
 ```
 
 dump source and target index to local file and compare them, so can find the difference quickly
 ```
-./bin/esm --sort=_id -s http://localhost:9200 -x "src_index" --truncate_output --skip=_index -o=src.json
-./bin/esm --sort=_id -s http://localhost:9200 -x "dst_index" --truncate_output --skip=_index -o=dst.json
-diff -W 200 -ry --suppress-common-lines src.json dst.json
+./esm --sort=_id -s http://localhost:9200 -x "src_index" --truncate_output -o=src.json
+./esm --sort=_id -s http://localhost:9200 -x "dst_index" --truncate_output -o=dst.json
+diff -W 200 -y --suppress-common-lines <(jq -c 'del(._index)' src.json) <(jq -c 'del(._index)' dst.json)
 ```
 
 loading data from dump files, bulk insert to another es instance
 ```
-./bin/esm -d http://localhost:9200 -y "dest_index"   -n admin:111111 -c 5000 -b 5 --refresh -i=dump.bin
+./esm -d http://localhost:9200 -y "dest_index"   -n elastic:passwd -c 5000 -b 5 --refresh -i=dump.bin
 ```
 
 support proxy
 ```
- ./bin/esm -d http://123345.ap-northeast-1.aws.found.io:9200 -y "dest_index"   -n admin:111111  -c 5000 -b 1 --refresh  -i dump.bin  --dest_proxy=http://127.0.0.1:9743
+ ./esm -d http://123345.ap-northeast-1.aws.found.io:9200 -y "dest_index"   -n elastic:passwd  -c 5000 -b 1 --refresh  -i dump.bin  --dest_proxy=http://127.0.0.1:9743
 ```
 
-use sliced scroll(only available in elasticsearch v5) to speed scroll, and update shard number
+use sliced scroll (elasticsearch 5.0+) to speed up the scroll, and update the number of shards
 ```
- ./bin/esm -s=http://192.168.3.206:9200 -d=http://localhost:9200 -n=elastic:changeme -f --copy_settings --copy_mappings -x=bestbuykaggle  --sliced_scroll_size=5 --shards=50 --refresh
+ ./esm -s=http://192.168.3.206:9200 -d=http://localhost:9200 -n=elastic:passwd -f --copy_settings --copy_mappings -x=bestbuykaggle  --sliced_scroll_size=5 --shards=50 --refresh
 ```
 
 migrate 5.x to 6.x and unify all the types to `doc`
 ```
-./esm -s http://source_es:9200 -x "source_index*"  -u "doc" -w 10 -b 10 - -t "10m" -d https://target_es:9200 -m elastic:passwd -n elastic:passwd -c 5000 
+./esm -s http://source_es:9200 -x "source_index*"  -u "doc" -w 10 -b 10 -t "10m" -d https://target_es:9200 -m elastic:passwd -n elastic:passwd -c 5000
 
 ```
 
@@ -136,23 +136,23 @@ filter migration with range query
 range query, keyword type and escape
 
 ```
-./esm -s https://192.168.3.98:9200 -m test:123 -o 1.txt -x test1  -q "@timestamp.keyword:[\"2021-01-17 03:41:20\" TO \"2021-03-17 03:41:20\"]"
+./esm -s https://192.168.3.98:9200 -m elastic:passwd -o 1.txt -x test1  -q "@timestamp.keyword:[\"2021-01-17 03:41:20\" TO \"2021-03-17 03:41:20\"]"
 ```
 
 generate testing data, if `input.json` contains 10 documents, the follow command will ingest 100 documents, good for testing
 ```
-./bin/esm -i input.json -d  http://localhost:9201 -y target-index1  --regenerate_id  --repeat_times=10 
+./esm -i input.json -d  http://localhost:9201 -y target-index1  --regenerate_id  --repeat_times=10 
 ```
 
 select source fields
 
 ```
- ./bin/esm -s http://localhost:9201 -x my_index -o dump.json --fields=author,title
+ ./esm -s http://localhost:9201 -x my_index -o dump.json --fields=author,title
 ```
 
-user buffer_count to control memory used by ESM
+use buffer_count to control the memory used by ESM
 ```
-./esm -s https://localhost:8000 -d https://localhost:8000 -x logs1kw -y logs122 -m elastic:medcl123 -n elastic:medcl123 --regenerate_id -w 20 --sliced_scroll_size=60 -b 5 --buffer_count=1000000
+./esm -s https://localhost:9200 -d https://localhost:9201 -x logs -y logs-copy -m elastic:passwd -n elastic:passwd -w 20 --sliced_scroll_size=10 -b 5 --buffer_count=100000
 ```
 
 migrate from elasticsearch 7.x to 9.x (or 8.x), copy settings and mappings, the target uses https and basic auth
@@ -181,7 +181,7 @@ https://github.com/InPoint-Cloud/esm/releases
 
 
 ## Compile:
-if download version is not fill you environment,you may try to compile it yourself. `go` required.
+if there is no download for your platform, compile it yourself, `go` is required.
 
 `go build -o esm .`
 * go version >= 1.26
@@ -195,6 +195,9 @@ then publishes them with checksums and a changelog as a GitHub release:
 git tag v1.0.0
 git push origin v1.0.0
 ```
+
+Before tagging, rename the `## Unreleased` section of `CHANGELOG.md` to the tag (ie: `## v1.0.0`),
+it becomes the description of the release. Without a section GoReleaser lists the commits since the last tag.
 
 Tags with a suffix such as `v1.1.0-rc.1` are published as pre-releases. Running the workflow
 manually builds a snapshot and attaches the binaries to the workflow run instead of releasing.
@@ -210,7 +213,7 @@ Application Options:
   -s, --source=                    source elasticsearch instance, ie:
                                    http://localhost:9200
   -q, --query=                     query against source elasticsearch instance,
-                                   filter data before migrate, ie: name:medcl
+                                   filter data before migrate, ie: name:john
       --sort=                      sort field when scroll, ie: _id (default:
                                    _id)
   -d, --dest=                      destination elasticsearch instance, ie:

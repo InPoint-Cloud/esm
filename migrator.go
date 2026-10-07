@@ -401,7 +401,7 @@ func (m *Migrator) SyncBetweenIndex(srcEsApi ESAPI, dstEsApi ESAPI, cfg *Config)
 	updateCount := 0
 	deleteCount := 0
 
-	//TODO: 进度计算,分为 [ scroll src/dst + index ] => delete 几个部分
+	//TODO: progress for the parts [ scroll src/dst + index ] => delete
 	srcBar := pb.New(1).Prefix("Progress")
 	//srcBar := pb.New(1).Prefix("Source")
 	//dstBar := pb.New(100).Prefix("Dest")
@@ -446,7 +446,7 @@ func (m *Migrator) SyncBetweenIndex(srcEsApi ESAPI, dstEsApi ESAPI, cfg *Config)
 				atomic.StoreInt32(&m.Stats.ReadFailed, 1)
 				return
 			} else {
-				//有 dest index,
+				// the dest index exists
 				//dstBar.Total = int64(dstScroll.GetHitsTotal()) // pb.New(dstScroll.GetHitsTotal()).Prefix("Dest")
 			}
 			//dstBar.Start()
@@ -464,7 +464,7 @@ func (m *Migrator) SyncBetweenIndex(srcEsApi ESAPI, dstEsApi ESAPI, cfg *Config)
 			}
 		}
 
-		//从目标 index 中查询,并放入 destMap, 如果没有则是空
+		// compare the current page of dest docs with the src docs seen so far
 		if needScrollDest {
 			start := time.Now()
 			for idx, dstDoc := range dstScroll.GetDocs() {
@@ -479,9 +479,9 @@ func (m *Migrator) SyncBetweenIndex(srcEsApi ESAPI, dstEsApi ESAPI, cfg *Config)
 				if srcSource, found := srcDocMaps[destId]; found {
 					delete(srcDocMaps, destId)
 
-					//如果从 src 的 map 中找到匹配地项
+					// found in the src docs
 					if !cfg.IgnoreContentCompare && !bytes.Equal(srcSource, dstSource) {
-						//不相等, 则需要更新
+						// different, needs an update
 						diffDocMaps[destId] = srcSource
 						if cfg.Dry {
 							//diff := cmp.Diff(srcSource, dstSource)
@@ -489,10 +489,10 @@ func (m *Migrator) SyncBetweenIndex(srcEsApi ESAPI, dstEsApi ESAPI, cfg *Config)
 						}
 
 					} else {
-						//完全相等, 则不需要处理
+						// equal, nothing to do
 					}
 				} else {
-					// 没有从 src 的 map 中找到匹配地项, 先放入 dstDocMaps 中等待后续对比
+					// not seen in src yet, keep it in dstDocMaps for a later comparison
 					dstDocMaps[destId] = dstSource
 				}
 				//dstBar.Increment()
@@ -504,7 +504,7 @@ func (m *Migrator) SyncBetweenIndex(srcEsApi ESAPI, dstEsApi ESAPI, cfg *Config)
 			}
 		}
 
-		//先将 src 的当前批次查出并放入 map
+		// compare the current page of src docs with the dest docs seen so far
 		if needScrollSrc {
 			start := time.Now()
 			for idx, srcDoc := range srcScroll.GetDocs() {
@@ -517,22 +517,22 @@ func (m *Migrator) SyncBetweenIndex(srcEsApi ESAPI, dstEsApi ESAPI, cfg *Config)
 				log.Debugf("src [%d]: srcId=%s", srcRecordIndex+idx, srcId)
 
 				if len(lastDestId) == 0 {
-					//没有 destId, 表示 目标 index 中没有数据, 直接全部更新
+					// no dest id yet, the dest index is empty, so the doc is new
 					newDocMaps[srcId] = srcSource
-				} else if dstSource, ok := dstDocMaps[srcId]; ok { //能从 dstDocMaps 中找到相同ID的数据
+				} else if dstSource, ok := dstDocMaps[srcId]; ok { // a dest doc with the same id
 					if !cfg.IgnoreContentCompare && !bytes.Equal(srcSource, dstSource) {
-						//不完全相同,需要更新,否则忽略
+						// update it if it differs
 						diffDocMaps[srcId] = srcSource
 					}
-					//从 dst 中删除相同的
+					// compared, forget the dest doc
 					delete(dstDocMaps, srcId)
 				} else {
-					//找不到相同的 id, 可能是 dst 还没找到, 或者 dst 中不存在
+					// no dest doc with this id, it is not scrolled yet or does not exist
 					if srcId < lastDestId {
-						//dest 已经超过当前的 srcId, 表示 dst 中不存在
+						// dest is already past this id, so it does not exist in dest
 						newDocMaps[srcId] = srcSource
 					} else {
-						// dest 可能还没有遍历到, 先放入 srcDocMaps 中等待后续对比
+						// dest may not be scrolled that far, keep it in srcDocMaps for a later comparison
 						srcDocMaps[srcId] = srcSource
 					}
 				}
@@ -567,7 +567,7 @@ func (m *Migrator) SyncBetweenIndex(srcEsApi ESAPI, dstEsApi ESAPI, cfg *Config)
 		}
 
 		if len(srcDocMaps) > 0 && lastSrcId < lastDestId {
-			// dst 已经中已经没有更多的记录, 可以直接将所有的 src 都同步到 dst 中了,避免其中保存太多
+			// dest is past all remaining src docs, they do not exist in dest, index them now to keep the map small
 			addCount += len(srcDocMaps)
 			if !cfg.Dry {
 				_ = m.bulkRecords(opIndex, dstEsApi, cfg.TargetIndexName, srcType, srcDocMaps)
@@ -578,7 +578,7 @@ func (m *Migrator) SyncBetweenIndex(srcEsApi ESAPI, dstEsApi ESAPI, cfg *Config)
 		}
 
 		if len(dstDocMaps) > 0 && lastSrcId > lastDestId {
-			//dstDocMaps 中还有记录,而且当前已经检测过所有的 src 记录, 说明这些 dst 记录是多余的,需要删除
+			// src is past the remaining dest docs, they do not exist in src and are deleted
 			deleteCount += len(dstDocMaps)
 			if !cfg.Dry && cfg.EnableDelete {
 				_ = m.bulkRecords(opDelete, dstEsApi, cfg.TargetIndexName, dstType, dstDocMaps)
@@ -593,12 +593,11 @@ func (m *Migrator) SyncBetweenIndex(srcEsApi ESAPI, dstEsApi ESAPI, cfg *Config)
 			needScrollSrc = true
 			needScrollDest = true
 		} else if len(lastDestId) == 0 || lastSrcId < lastDestId {
-			//len(lastDestId) == 0 表示dest数据为空
-			//上一次要求遍历 dest,但遍历出空
+			// dest is empty (len(lastDestId) == 0) or src is behind: scroll src
 			needScrollSrc = true
 			needScrollDest = false
 		} else if lastSrcId > lastDestId {
-			//上一次要求遍历 src, 但遍历出空
+			// dest is behind: scroll dest
 			needScrollSrc = false
 			needScrollDest = true
 		}
@@ -609,7 +608,7 @@ func (m *Migrator) SyncBetweenIndex(srcEsApi ESAPI, dstEsApi ESAPI, cfg *Config)
 			needScrollDest = false
 		}
 
-		//如果 src 和 dst 都遍历完毕, 才退出
+		// quit once both src and dest are scrolled completely
 		log.Debugf("lastSrcId=%s, lastDestId=%s, "+
 			"needScrollSrc=%t, len(srcScroll.GetDocs()=%d, "+
 			"needScrollDest=%t, len(dstScroll.GetDocs())=%d",
@@ -630,7 +629,7 @@ func (m *Migrator) SyncBetweenIndex(srcEsApi ESAPI, dstEsApi ESAPI, cfg *Config)
 				}
 			}
 			if len(dstDocMaps) > 0 {
-				//最后在 dst 中还有遗留的,表示 dst 中多的.需要删除
+				// the dest docs left over do not exist in src and are deleted
 				deleteCount += len(dstDocMaps)
 				if !cfg.Dry && cfg.EnableDelete {
 					_ = m.bulkRecords(opDelete, dstEsApi, cfg.TargetIndexName, dstType, dstDocMaps)
@@ -642,7 +641,7 @@ func (m *Migrator) SyncBetweenIndex(srcEsApi ESAPI, dstEsApi ESAPI, cfg *Config)
 			break
 		}
 
-		//目标不存在 或 src 还没有查询到和 dest 一样的地方
+		// dest does not exist or src has not caught up with dest yet
 		if cfg.SleepSecondsAfterEachBulk > 0 {
 			time.Sleep(time.Duration(cfg.SleepSecondsAfterEachBulk) * time.Second)
 		}

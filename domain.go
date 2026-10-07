@@ -128,7 +128,7 @@ type Config struct {
 
 	// config options
 	SourceEs          string `short:"s" long:"source"  description:"source elasticsearch instance, ie: http://localhost:9200"`
-	Query             string `short:"q" long:"query"  description:"query against source elasticsearch instance, filter data before migrate, ie: name:medcl"`
+	Query             string `short:"q" long:"query"  description:"query against source elasticsearch instance, filter data before migrate, ie: name:john"`
 	SortField         string `long:"sort" description:"sort field when scroll, ie: _id" default:"_id"`
 	TargetEs          string `short:"d" long:"dest"    description:"destination elasticsearch instance, ie: http://localhost:9201"`
 	SourceEsAuthStr   string `short:"m" long:"source_auth"  description:"basic auth of source elasticsearch instance, ie: user:pass"`

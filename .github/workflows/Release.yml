@@ -31,12 +31,22 @@ jobs:
 
       # A manual run (no tag) builds a snapshot and keeps the binaries as a
       # workflow artifact; a tag push publishes a GitHub release.
+      # The "## <tag>" section of CHANGELOG.md becomes the release description,
+      # without one GoReleaser lists the commits since the last tag.
+      - name: Extract release notes
+        id: notes
+        run: |
+          awk -v tag="## ${GITHUB_REF_NAME}" '$0 == tag {found=1; next} /^## / {found=0} found' CHANGELOG.md > "$RUNNER_TEMP/notes.md"
+          if [ -n "$(tr -d '[:space:]' < "$RUNNER_TEMP/notes.md")" ]; then
+            echo "args=--release-notes=$RUNNER_TEMP/notes.md" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v7
         with:
           distribution: goreleaser
           version: "~> v2"
-          args: release --clean ${{ github.ref_type != 'tag' && '--snapshot' || '' }}
+          args: release --clean ${{ github.ref_type != 'tag' && '--snapshot' || '' }} ${{ steps.notes.outputs.args }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
