@@ -149,9 +149,12 @@ func isRetryable(err error) bool {
 	return true
 }
 
+// retryBaseDelay is the wait time before the first retry, tests make it shorter
+var retryBaseDelay = time.Second
+
 // backoff returns the wait time before retry number attempt (starting at 1): 1s, 2s, 4s, ... capped at 30s
 func backoff(attempt int) time.Duration {
-	d := time.Second << uint(attempt-1)
+	d := retryBaseDelay << uint(attempt-1)
 	if d > 30*time.Second || d <= 0 {
 		d = 30 * time.Second
 	}

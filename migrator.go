@@ -102,7 +102,7 @@ func (m *Migrator) ClusterVersion(host string, auth *Auth, proxy string) (*Clust
 	return version, nil
 }
 
-func (m *Migrator) ParseEsApi(isSource bool, host string, authStr string, apiKey string, proxy string, compress bool) ESAPI {
+func (m *Migrator) ParseEsApi(isSource bool, host string, authStr string, apiKey string, proxy string) ESAPI {
 	var auth *Auth = nil
 	if len(apiKey) > 0 {
 		auth = &Auth{ApiKey: apiKey}
@@ -133,7 +133,6 @@ func (m *Migrator) ParseEsApi(isSource bool, host string, authStr string, apiKey
 		log.Debug("es is v8+,", esVersion.Version.Number)
 		api := new(ESAPIV8)
 		api.Host = host
-		api.Compress = compress
 		api.Auth = auth
 		api.HttpProxy = proxy
 		api.Version = esVersion
@@ -142,7 +141,6 @@ func (m *Migrator) ParseEsApi(isSource bool, host string, authStr string, apiKey
 		log.Debug("es is V7,", esVersion.Version.Number)
 		api := new(ESAPIV7)
 		api.Host = host
-		api.Compress = compress
 		api.Auth = auth
 		api.HttpProxy = proxy
 		api.Version = esVersion
@@ -152,7 +150,6 @@ func (m *Migrator) ParseEsApi(isSource bool, host string, authStr string, apiKey
 		log.Debug("es is V6,", esVersion.Version.Number)
 		api := new(ESAPIV6)
 		api.Host = host
-		api.Compress = compress
 		api.Auth = auth
 		api.HttpProxy = proxy
 		api.Version = esVersion
@@ -162,7 +159,6 @@ func (m *Migrator) ParseEsApi(isSource bool, host string, authStr string, apiKey
 		log.Debug("es is V5,", esVersion.Version.Number)
 		api := new(ESAPIV5)
 		api.Host = host
-		api.Compress = compress
 		api.Auth = auth
 		api.HttpProxy = proxy
 		api.Version = esVersion
@@ -172,7 +168,6 @@ func (m *Migrator) ParseEsApi(isSource bool, host string, authStr string, apiKey
 		log.Debug("es is not V5,", esVersion.Version.Number)
 		api := new(ESAPIV0)
 		api.Host = host
-		api.Compress = compress
 		api.Auth = auth
 		api.HttpProxy = proxy
 		api.Version = esVersion

@@ -32,7 +32,6 @@ type ESAPIV0 struct {
 	Host      string //eg: http://localhost:9200
 	Auth      *Auth  //eg: user:pass
 	HttpProxy string //eg: http://proxyIp:proxyPort
-	Compress  bool
 	Version   *ClusterVersion
 }
 
@@ -78,7 +77,7 @@ func (s *ESAPIV0) Bulk(data *bytes.Buffer) (*BulkResponse, error) {
 	}
 	url := fmt.Sprintf("%s/_bulk", s.Host)
 
-	body, err := Request(s.Compress, "POST", url, s.Auth, data, s.HttpProxy)
+	body, err := Request("POST", url, s.Auth, data, s.HttpProxy)
 	data.Reset()
 	if err != nil {
 		return nil, err
@@ -99,7 +98,7 @@ func (s *ESAPIV0) Count(indexName string, query string) (int, error) {
 		})
 		reqBody = bytes.NewBuffer(q)
 	}
-	body, err := Request(false, "POST", url, s.Auth, reqBody, s.HttpProxy)
+	body, err := Request("POST", url, s.Auth, reqBody, s.HttpProxy)
 	if err != nil {
 		return 0, err
 	}
@@ -250,20 +249,20 @@ func (s *ESAPIV0) UpdateIndexSettings(name string, settings map[string]interface
 			log.Debug("update static index settings: ", name)
 			staticIndexSettings := getEmptyIndexSettings()
 			staticIndexSettings["settings"].(map[string]interface{})["index"].(map[string]interface{})["analysis"] = set
-			Request(false, "POST", fmt.Sprintf("%s/%s/_close", s.Host, name), s.Auth, nil, s.HttpProxy)
+			Request("POST", fmt.Sprintf("%s/%s/_close", s.Host, name), s.Auth, nil, s.HttpProxy)
 			//Post(fmt.Sprintf("%s/%s/_close", s.Host, name), s.Auth, "", s.HttpProxy)
 			body := bytes.Buffer{}
 			enc := json.NewEncoder(&body)
 			enc.Encode(staticIndexSettings)
-			bodyStr, err := Request(s.Compress, "PUT", url, s.Auth, &body, s.HttpProxy)
+			bodyStr, err := Request("PUT", url, s.Auth, &body, s.HttpProxy)
 			if err != nil {
 				log.Error(bodyStr, err)
 				// reopen the index before giving up
-				Request(false, "POST", fmt.Sprintf("%s/%s/_open", s.Host, name), s.Auth, nil, s.HttpProxy)
+				Request("POST", fmt.Sprintf("%s/%s/_open", s.Host, name), s.Auth, nil, s.HttpProxy)
 				return err
 			}
 			delete(settings["settings"].(map[string]interface{})["index"].(map[string]interface{}), "analysis")
-			Request(false, "POST", fmt.Sprintf("%s/%s/_open", s.Host, name), s.Auth, nil, s.HttpProxy)
+			Request("POST", fmt.Sprintf("%s/%s/_open", s.Host, name), s.Auth, nil, s.HttpProxy)
 			//Post(fmt.Sprintf("%s/%s/_open", s.Host, name), s.Auth, "", s.HttpProxy)
 		}
 	}
@@ -273,7 +272,7 @@ func (s *ESAPIV0) UpdateIndexSettings(name string, settings map[string]interface
 	body := bytes.Buffer{}
 	enc := json.NewEncoder(&body)
 	enc.Encode(settings)
-	_, err := Request(s.Compress, "PUT", url, s.Auth, &body, s.HttpProxy)
+	_, err := Request("PUT", url, s.Auth, &body, s.HttpProxy)
 
 	return err
 }
@@ -291,7 +290,7 @@ func (s *ESAPIV0) UpdateIndexMapping(indexName string, settings map[string]inter
 		body := bytes.Buffer{}
 		enc := json.NewEncoder(&body)
 		enc.Encode(mapping)
-		res, err := Request(s.Compress, "POST", url, s.Auth, &body, s.HttpProxy)
+		res, err := Request("POST", url, s.Auth, &body, s.HttpProxy)
 		if err != nil {
 			log.Error(url)
 			log.Error(body.String())
@@ -308,7 +307,7 @@ func (s *ESAPIV0) DeleteIndex(name string) (err error) {
 
 	url := fmt.Sprintf("%s/%s", s.Host, name)
 
-	Request(s.Compress, "DELETE", url, s.Auth, nil, s.HttpProxy)
+	Request("DELETE", url, s.Auth, nil, s.HttpProxy)
 
 	log.Debug("delete index: ", name)
 
@@ -325,7 +324,7 @@ func (s *ESAPIV0) CreateIndex(name string, settings map[string]interface{}) (err
 
 	url := fmt.Sprintf("%s/%s", s.Host, name)
 
-	resp, err := Request(s.Compress, "PUT", url, s.Auth, &body, s.HttpProxy)
+	resp, err := Request("PUT", url, s.Auth, &body, s.HttpProxy)
 	log.Debugf("response: %s", resp)
 
 	return err
@@ -337,7 +336,7 @@ func (s *ESAPIV0) Refresh(name string) (err error) {
 
 	url := fmt.Sprintf("%s/%s/_refresh", s.Host, name)
 
-	resp, err := Request(false, "POST", url, s.Auth, nil, s.HttpProxy)
+	resp, err := Request("POST", url, s.Auth, nil, s.HttpProxy)
 	log.Infof("refresh resp=%s, err=%+v", resp, err)
 	//resp, _, _ := Post(url, s.Auth, "", s.HttpProxy)
 	//if resp != nil && resp.Body != nil {
@@ -385,7 +384,7 @@ func (s *ESAPIV0) NewScroll(indexNames string, scrollTime string, docBufferCount
 
 	}
 	//resp, body, errs := Post(url, s.Auth,jsonBody,s.HttpProxy)
-	body, err := Request(s.Compress, "POST", url, s.Auth, bytes.NewBuffer(jsonBody), s.HttpProxy)
+	body, err := Request("POST", url, s.Auth, bytes.NewBuffer(jsonBody), s.HttpProxy)
 	if err != nil {
 		log.Error(err)
 		return nil, err
@@ -405,7 +404,7 @@ func (s *ESAPIV0) NextScroll(scrollTime string, scrollId string) (ScrollAPI, err
 	//  curl -XGET 'http://es-0.9:9200/_search/scroll?scroll=5m'
 	id := bytes.NewBufferString(scrollId)
 	url := fmt.Sprintf("%s/_search/scroll?scroll=%s&scroll_id=%s", s.Host, scrollTime, id)
-	body, err := Request(s.Compress, "GET", url, s.Auth, nil, s.HttpProxy)
+	body, err := Request("GET", url, s.Auth, nil, s.HttpProxy)
 
 	if err != nil {
 		log.Error(err)
@@ -427,7 +426,7 @@ func (s *ESAPIV0) DeleteScroll(scrollId string) error {
 	id := bytes.NewBufferString(scrollId)
 	url := fmt.Sprintf("%s/_search/scroll?scroll_id=%s", s.Host, id)
 	if len(scrollId) > 0 {
-		_, err := Request(false, "DELETE", url, s.Auth, nil, s.HttpProxy)
+		_, err := Request("DELETE", url, s.Auth, nil, s.HttpProxy)
 		if err != nil {
 			log.Error(err)
 			return err

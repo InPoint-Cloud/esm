@@ -127,7 +127,7 @@ func (e *HTTPStatusError) Error() string {
 	return fmt.Sprintf("server error: code=%d, length=%d, info=", e.Code, e.Length) + e.Body
 }
 
-func Request(compress bool, method string, loadUrl string, auth *Auth, body *bytes.Buffer, proxy string) (string, error) {
+func Request(method string, loadUrl string, auth *Auth, body *bytes.Buffer, proxy string) (string, error) {
 
 	client, err := getClient(proxy)
 	if err != nil {

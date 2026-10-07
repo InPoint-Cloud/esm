@@ -121,7 +121,7 @@ func (m *Migrator) migrateRound(showBar bool) error {
 // startScrollReaders starts one reader per scroll slice of the source es, DocChan is closed when all are done
 func (m *Migrator) startScrollReaders(wg *sync.WaitGroup, fetchBar, outputBar *pb.ProgressBar, showBar bool) error {
 	c := m.Config
-	m.SourceESAPI = m.ParseEsApi(true, c.SourceEs, c.SourceEsAuthStr, c.SourceEsApiKey, c.SourceProxy, c.Compress)
+	m.SourceESAPI = m.ParseEsApi(true, c.SourceEs, c.SourceEsAuthStr, c.SourceEsApiKey, c.SourceProxy)
 	if m.SourceESAPI == nil {
 		return fmt.Errorf("can not parse source es api")
 	}
@@ -207,7 +207,7 @@ func countLines(path string) (int, error) {
 // prepareTarget connects to the target es, waits for the clusters and copies index settings and mappings
 func (m *Migrator) prepareTarget() error {
 	c := m.Config
-	m.TargetESAPI = m.ParseEsApi(false, c.TargetEs, c.TargetEsAuthStr, c.TargetEsApiKey, c.TargetProxy, false)
+	m.TargetESAPI = m.ParseEsApi(false, c.TargetEs, c.TargetEsAuthStr, c.TargetEsApiKey, c.TargetProxy)
 	if m.TargetESAPI == nil {
 		return fmt.Errorf("can not parse target es api")
 	}
@@ -247,6 +247,9 @@ func (m *Migrator) prepareTarget() error {
 	return nil
 }
 
+// clusterWaitInterval is the time between two cluster health checks, tests make it shorter
+var clusterWaitInterval = 3 * time.Second
+
 // waitForClusters blocks until source and target are ready, see ClusterReady
 func (m *Migrator) waitForClusters() {
 	c := m.Config
@@ -265,7 +268,7 @@ func (m *Migrator) waitForClusters() {
 				break
 			}
 			log.Infof("%s at %s is %s, delaying migration ", status.Name, cluster.url, status.Status)
-			time.Sleep(3 * time.Second)
+			time.Sleep(clusterWaitInterval)
 		}
 	}
 }

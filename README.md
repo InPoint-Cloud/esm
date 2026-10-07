@@ -150,9 +150,9 @@ select source fields
  ./bin/esm -s http://localhost:9201 -x my_index -o dump.json --fields=author,title
 ```
 
-user buffer_count to control memory used by ESM， and use gzip to compress network traffic
+user buffer_count to control memory used by ESM
 ```
-./esm -s https://localhost:8000 -d https://localhost:8000 -x logs1kw -y logs122 -m elastic:medcl123 -n elastic:medcl123 --regenerate_id -w 20 --sliced_scroll_size=60 -b 5 --buffer_count=1000000 --compress false 
+./esm -s https://localhost:8000 -d https://localhost:8000 -x logs1kw -y logs122 -m elastic:medcl123 -n elastic:medcl123 --regenerate_id -w 20 --sliced_scroll_size=60 -b 5 --buffer_count=1000000
 ```
 
 migrate from elasticsearch 7.x to 9.x (or 8.x), copy settings and mappings, the target uses https and basic auth
@@ -279,7 +279,6 @@ Application Options:
                                    regenerate_id to amplify the data size
   -r, --regenerate_id              regenerate id for documents, this will
                                    override the exist document id in data source
-      --compress                   use gzip to compress traffic
   -p, --sleep=                     sleep N seconds after each bulk request
                                    (default: -1)
       --diff_counts                count the difference between source and

@@ -74,7 +74,7 @@ func (s *ESAPIV6) NewScroll(indexNames string, scrollTime string, docBufferCount
 		}
 	}
 
-	body, err := Request(s.Compress, "POST", url, s.Auth, bytes.NewBuffer(jsonBody), s.HttpProxy)
+	body, err := Request("POST", url, s.Auth, bytes.NewBuffer(jsonBody), s.HttpProxy)
 	if err != nil {
 		log.Error(err)
 		return nil, err
@@ -94,7 +94,7 @@ func (s *ESAPIV6) NextScroll(scrollTime string, scrollId string) (ScrollAPI, err
 	id := bytes.NewBufferString(scrollId)
 
 	url := fmt.Sprintf("%s/_search/scroll?scroll=%s&scroll_id=%s", s.Host, scrollTime, id)
-	body, err := Request(s.Compress, "GET", url, s.Auth, nil, s.HttpProxy)
+	body, err := Request("GET", url, s.Auth, nil, s.HttpProxy)
 	if err != nil {
 		// logged and retried by the caller
 		return nil, err
@@ -192,7 +192,7 @@ func (s *ESAPIV6) UpdateIndexMapping(indexName string, settings map[string]inter
 		body := bytes.Buffer{}
 		enc := json.NewEncoder(&body)
 		enc.Encode(settings)
-		res, err := Request(s.Compress, "POST", url, s.Auth, &body, s.HttpProxy)
+		res, err := Request("POST", url, s.Auth, &body, s.HttpProxy)
 		if err != nil {
 			log.Error(url)
 			log.Error(settings)

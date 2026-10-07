@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"path"
 	"sort"
 	"strconv"
 	"strings"
@@ -21,7 +22,13 @@ type fakeES struct {
 	version     string // cluster version, ie: 7.10.2
 	tls         bool   // serve https with a self-signed certificate
 	scrollError int    // if set, requests for the next scroll page fail with this status code
+	scrollFails int    // number of failing scroll requests before they succeed again, 0 fails all of them
 	rejectBulk  int    // if set, every bulk item fails with this status code
+	bulkStatus  []int  // status codes of the next whole bulk requests, ie: 503 for an overloaded cluster
+	itemStatus  []int  // status codes of the next bulk items, ie: 429 for rejected documents
+	auth        string // required Authorization header
+	health      string // cluster health status of the next healthChecks requests, then green
+	healthCheck int
 
 	mu       sync.Mutex
 	indices  map[string]*fakeIndex
@@ -143,6 +150,12 @@ func (f *fakeES) handle(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
+	if f.auth != "" && r.Header.Get("Authorization") != f.auth {
+		w.WriteHeader(401)
+		w.Write([]byte(`{"error":{"type":"security_exception","reason":"missing authentication credentials"},"status":401}`))
+		return
+	}
+
 	reply := func(status int, o interface{}) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(status)
@@ -157,8 +170,19 @@ func (f *fakeES) handle(w http.ResponseWriter, r *http.Request) {
 	case r.URL.Path == "/":
 		reply(200, map[string]interface{}{"version": map[string]string{"number": f.version}})
 	case r.URL.Path == "/_cluster/health":
-		reply(200, map[string]string{"cluster_name": "fake", "status": "green"})
+		health := "green"
+		if f.healthCheck > 0 {
+			f.healthCheck--
+			health = f.health
+		}
+		reply(200, map[string]string{"cluster_name": "fake", "status": health})
 	case r.URL.Path == "/_bulk":
+		if len(f.bulkStatus) > 0 {
+			status := f.bulkStatus[0]
+			f.bulkStatus = f.bulkStatus[1:]
+			reply(status, map[string]string{"error": "bulk failed"})
+			return
+		}
 		reply(200, f.bulk(body))
 	case r.URL.Path == "/_search/scroll":
 		if r.Method == http.MethodDelete {
@@ -166,7 +190,13 @@ func (f *fakeES) handle(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if f.scrollError != 0 {
-			reply(f.scrollError, map[string]string{"error": "scroll failed"})
+			status := f.scrollError
+			if f.scrollFails > 0 {
+				if f.scrollFails--; f.scrollFails == 0 {
+					f.scrollError = 0
+				}
+			}
+			reply(status, map[string]string{"error": "scroll failed"})
 			return
 		}
 		id := r.URL.Query().Get("scroll_id")
@@ -216,11 +246,14 @@ func (f *fakeES) handle(w http.ResponseWriter, r *http.Request) {
 	case len(parts) >= 2:
 		names, action := parts[0], parts[len(parts)-1]
 		var existing []string
-		for _, n := range strings.Split(names, ",") {
-			if _, ok := f.indices[n]; ok {
-				existing = append(existing, n)
+		for _, pattern := range strings.Split(names, ",") {
+			for n := range f.indices {
+				if ok, _ := path.Match(pattern, n); ok || pattern == "_all" {
+					existing = append(existing, n)
+				}
 			}
 		}
+		sort.Strings(existing)
 		if len(existing) == 0 {
 			notFound(names)
 			return
@@ -352,8 +385,13 @@ func (f *fakeES) bulk(body []byte) interface{} {
 			continue
 		}
 		for op, meta := range action {
-			if f.rejectBulk != 0 {
-				items = append(items, map[string]interface{}{op: map[string]interface{}{"_id": meta.Id, "status": f.rejectBulk,
+			status := f.rejectBulk
+			if len(f.itemStatus) > 0 {
+				status = f.itemStatus[0]
+				f.itemStatus = f.itemStatus[1:]
+			}
+			if status != 0 {
+				items = append(items, map[string]interface{}{op: map[string]interface{}{"_index": meta.Index, "_id": meta.Id, "status": status,
 					"error": map[string]string{"type": "mapper_parsing_exception", "reason": "rejected"}}})
 				if op != "delete" {
 					s.Scan()

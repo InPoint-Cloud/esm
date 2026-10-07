@@ -166,7 +166,6 @@ type Config struct {
 
 	RepeatOutputTimes              int    `long:"repeat_times"            description:"repeat the data from source N times to dest output, use align with parameter regenerate_id to amplify the data size "`
 	RegenerateID                   bool   `short:"r" long:"regenerate_id"   description:"regenerate id for documents, this will override the exist document id in data source"`
-	Compress                       bool   `long:"compress"            description:"use gzip to compress traffic"`
 	SleepSecondsAfterEachBulk      int    `short:"p" long:"sleep" description:"sleep N seconds after each bulk request" default:"-1"`
 	DiffCounts                     bool   `long:"diff_counts" description:"count the difference between source and target indexes"`
 	RemainMappingRoutingAllocation bool   `long:"remain_routing_allocation" description:"keep routing allocation in mappings"`

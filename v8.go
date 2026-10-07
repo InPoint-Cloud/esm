@@ -50,7 +50,7 @@ func (s *ESAPIV8) NextScroll(scrollTime string, scrollId string) (ScrollAPI, err
 	data, _ := json.Marshal(param)
 	reqData := bytes.NewBuffer(data)
 	url := fmt.Sprintf("%s/_search/scroll", s.Host)
-	body, err := Request(s.Compress, "POST", url, s.Auth, reqData, s.HttpProxy)
+	body, err := Request("POST", url, s.Auth, reqData, s.HttpProxy)
 
 	if err != nil {
 		//log.Error(errs)
@@ -73,7 +73,7 @@ func (s *ESAPIV8) DeleteScroll(scrollId string) error {
 	}
 	data, _ := json.Marshal(map[string]string{"scroll_id": scrollId})
 	url := fmt.Sprintf("%s/_search/scroll", s.Host)
-	_, err := Request(false, "DELETE", url, s.Auth, bytes.NewBuffer(data), s.HttpProxy)
+	_, err := Request("DELETE", url, s.Auth, bytes.NewBuffer(data), s.HttpProxy)
 	if err != nil {
 		log.Error(err)
 		return err
@@ -105,7 +105,7 @@ func (s *ESAPIV8) UpdateIndexMapping(indexName string, mappings map[string]inter
 	body := bytes.Buffer{}
 	enc := json.NewEncoder(&body)
 	enc.Encode(mappings)
-	res, err := Request(s.Compress, "PUT", url, s.Auth, &body, s.HttpProxy)
+	res, err := Request("PUT", url, s.Auth, &body, s.HttpProxy)
 	if err != nil {
 		log.Error(url)
 		log.Error(body.String())

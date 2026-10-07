@@ -45,3 +45,26 @@ func TestOutput(t *testing.T) {
 		t.Errorf("trace level not named TRACE:\n%s", buf.String())
 	}
 }
+
+func TestHelpers(t *testing.T) {
+	var buf bytes.Buffer
+	Setup(&buf, LevelTrace)
+	defer Setup(&bytes.Buffer{}, slog.LevelInfo)
+
+	Tracef("t%d", 1)
+	Debugf("d%d", 2)
+	Infof("i%d", 3)
+	Warn("w", 4)
+	Warnf("w%d", 5)
+	Error("e", 6)
+
+	out := buf.String()
+	for _, want := range []string{"msg=t1", "msg=d2", "msg=i3", "msg=w4", "msg=w5", "msg=e6", "level=WARN", "level=DEBUG"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output misses %s:\n%s", want, out)
+		}
+	}
+	if got := shortFile("no-slash.go"); got != "no-slash.go" {
+		t.Errorf("shortFile = %q", got)
+	}
+}
