@@ -23,7 +23,6 @@ import (
 	"fmt"
 	log "github.com/cihub/seelog"
 	"io"
-	"io/ioutil"
 	"regexp"
 	"strings"
 )
@@ -80,7 +79,7 @@ func (s *ESAPIV7) NewScroll(indexNames string, scrollTime string, docBufferCount
 	//resp, body, errs := Post(url, s.Auth, jsonBody, s.HttpProxy)
 
 	//if resp != nil && resp.Body != nil {
-	//	io.Copy(ioutil.Discard, resp.Body)
+	//	io.Copy(io.Discard, resp.Body)
 	//	defer resp.Body.Close()
 	//}
 
@@ -136,7 +135,7 @@ func (s *ESAPIV7) GetIndexMappings(copyAllIndexes bool, indexNames string) (stri
 	resp, body, errs := Get(url, s.Auth, s.HttpProxy)
 
 	if resp != nil && resp.Body != nil {
-		io.Copy(ioutil.Discard, resp.Body)
+		io.Copy(io.Discard, resp.Body)
 		defer resp.Body.Close()
 	}
 

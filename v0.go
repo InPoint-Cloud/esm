@@ -23,7 +23,6 @@ import (
 	"fmt"
 	log "github.com/cihub/seelog"
 	"io"
-	"io/ioutil"
 	"regexp"
 	"strconv"
 	"strings"
@@ -43,7 +42,7 @@ func (s *ESAPIV0) ClusterHealth() *ClusterHealth {
 	r, body, errs := Get(url, s.Auth, s.HttpProxy)
 
 	if r != nil && r.Body != nil {
-		io.Copy(ioutil.Discard, r.Body)
+		io.Copy(io.Discard, r.Body)
 		defer r.Body.Close()
 	}
 
@@ -122,7 +121,7 @@ func (s *ESAPIV0) GetIndexSettings(indexNames string) (*Indexes, error) {
 	resp, body, errs := Get(url, s.Auth, s.HttpProxy)
 
 	if resp != nil && resp.Body != nil {
-		io.Copy(ioutil.Discard, resp.Body)
+		io.Copy(io.Discard, resp.Body)
 		defer resp.Body.Close()
 	}
 
@@ -150,7 +149,7 @@ func (s *ESAPIV0) GetIndexMappings(copyAllIndexes bool, indexNames string) (stri
 	resp, body, errs := Get(url, s.Auth, s.HttpProxy)
 
 	if resp != nil && resp.Body != nil {
-		io.Copy(ioutil.Discard, resp.Body)
+		io.Copy(io.Discard, resp.Body)
 		defer resp.Body.Close()
 	}
 
@@ -342,7 +341,7 @@ func (s *ESAPIV0) Refresh(name string) (err error) {
 	log.Infof("refresh resp=%s, err=%+v", resp, err)
 	//resp, _, _ := Post(url, s.Auth, "", s.HttpProxy)
 	//if resp != nil && resp.Body != nil {
-	//	io.Copy(ioutil.Discard, resp.Body)
+	//	io.Copy(io.Discard, resp.Body)
 	//	defer resp.Body.Close()
 	//}
 
@@ -502,7 +501,7 @@ func (c *ESAPIV0) GetIndices(pattern string) (*map[string]IndexInfo, error) {
 	url := fmt.Sprintf(format, c.Host, pattern)
 	resp, body, errs := Get(url, c.Auth, c.HttpProxy)
 	if resp != nil && resp.Body != nil {
-		io.Copy(ioutil.Discard, resp.Body)
+		io.Copy(io.Discard, resp.Body)
 		defer resp.Body.Close()
 	}
 	if errs != nil {

@@ -19,24 +19,16 @@ package main
 import (
 	"bytes"
 	"crypto/tls"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	log "github.com/cihub/seelog"
 	"github.com/parnurzeal/gorequest"
-	"github.com/valyala/fasthttp"
 	"io"
 	"net/http"
 	"net/url"
 	"strings"
 	"sync"
 )
-
-func BasicAuth(req *fasthttp.Request, user, pass string) {
-	msg := fmt.Sprintf("%s:%s", user, pass)
-	encoded := base64.StdEncoding.EncodeToString([]byte(msg))
-	req.Header.Add("Authorization", "Basic "+encoded)
-}
 
 func Get(url string, auth *Auth, proxy string) (*http.Response, string, []error) {
 
@@ -68,34 +60,6 @@ func Get(url string, auth *Auth, proxy string) (*http.Response, string, []error)
 	resp, body, errs := request.End()
 	return resp, body, errs
 
-}
-
-func Post(url string, auth *Auth, body string, proxy string) (*http.Response, string, []error) {
-	request := gorequest.New()
-	tr := &http.Transport{
-		DisableKeepAlives:  true,
-		DisableCompression: false,
-		TLSClientConfig:    &tls.Config{InsecureSkipVerify: true},
-	}
-	request.Transport = tr
-
-	if auth != nil {
-		request.SetBasicAuth(auth.User, auth.Pass)
-	}
-
-	//request.Type("application/json")
-
-	if len(proxy) > 0 {
-		request.Proxy(proxy)
-	}
-
-	request.Post(url)
-
-	if len(body) > 0 {
-		request.Send(body)
-	}
-
-	return request.End()
 }
 
 func newDeleteRequest(client *http.Client, method, urlStr string) (*http.Request, error) {
@@ -200,7 +164,7 @@ func Request(compress bool, method string, loadUrl string, auth *Auth, body *byt
 	}
 
 	if resp != nil && resp.Body != nil {
-		//io.Copy(ioutil.Discard, resp.Body)
+		//io.Copy(io.Discard, resp.Body)
 		defer resp.Body.Close()
 	}
 
@@ -232,18 +196,6 @@ func DecodeJson(jsonStream string, o interface{}) error {
 	// UseNumber causes the Decoder to unmarshal a number into an interface{} as a Number instead of as a float64.
 	decoder.UseNumber()
 	//decoder.
-
-	if err := decoder.Decode(o); err != nil {
-		fmt.Println("error:", err)
-		return err
-	}
-	return nil
-}
-
-func DecodeJsonBytes(jsonStream []byte, o interface{}) error {
-	decoder := json.NewDecoder(bytes.NewReader(jsonStream))
-	// UseNumber causes the Decoder to unmarshal a number into an interface{} as a Number instead of as a float64.
-	decoder.UseNumber()
 
 	if err := decoder.Decode(o); err != nil {
 		fmt.Println("error:", err)

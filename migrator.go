@@ -24,7 +24,6 @@ import (
 	log "github.com/cihub/seelog"
 	//"github.com/google/go-cmp/cmp"
 	"io"
-	"io/ioutil"
 	"strings"
 	"sync"
 	"time"
@@ -71,11 +70,11 @@ func (m *Migrator) recoveryIndexSettings(sourceIndexRefreshSettings map[string]i
 
 func (m *Migrator) ClusterVersion(host string, auth *Auth, proxy string) (*ClusterVersion, []error) {
 
-	url := fmt.Sprintf("%s", host)
+	url := host
 	resp, body, errs := Get(url, auth, proxy)
 
 	if resp != nil && resp.Body != nil {
-		io.Copy(ioutil.Discard, resp.Body)
+		io.Copy(io.Discard, resp.Body)
 		defer resp.Body.Close()
 	}
 
@@ -196,7 +195,7 @@ func (m *Migrator) ClusterReady(api ESAPI) (*ClusterHealth, bool) {
 		return health, false
 	}
 
-	if m.Config.WaitForGreen == false && health.Status == "yellow" {
+	if !m.Config.WaitForGreen && health.Status == "yellow" {
 		return health, true
 	}
 
@@ -207,7 +206,7 @@ func (m *Migrator) ClusterReady(api ESAPI) (*ClusterHealth, bool) {
 	return health, false
 }
 
-func (m *Migrator) NewBulkWorker(docCount *int, pb *pb.ProgressBar, wg *sync.WaitGroup) {
+func (m *Migrator) NewBulkWorker(pb *pb.ProgressBar, wg *sync.WaitGroup) {
 
 	log.Debug("start es bulk worker")
 
@@ -226,6 +225,7 @@ func (m *Migrator) NewBulkWorker(docCount *int, pb *pb.ProgressBar, wg *sync.Wai
 	defer taskTimeout.Stop()
 
 	haveTypeField := !m.targetIsTypeless()
+	skipFields := splitFieldList(m.Config.SkipFields)
 
 	flush := func() {
 		log.Trace("clean buffer, and execute bulk insert")
@@ -284,14 +284,19 @@ READ_DOCS:
 				docBuf.Reset()
 				continue
 			}
-			docBuf.Write(src.Source)
+			source, err := removeSourceFields(src.Source, skipFields)
+			if err != nil {
+				log.Error(err)
+				docBuf.Reset()
+				continue
+			}
+			docBuf.Write(source)
 			docBuf.WriteByte('\n')
 			item := make([]byte, docBuf.Len())
 			copy(item, docBuf.Bytes())
 			docBuf.Reset()
 			items = append(items, item)
 			itemsSize += len(item)
-			(*docCount)++
 
 			// if we approach the es bulk size limit, flush to es
 			if itemsSize > (m.Config.BulkSizeInMB * 1024 * 1024) {
@@ -366,7 +371,7 @@ func (m *Migrator) bulkRecords(bulkOp BulkOperation, dstEsApi ESAPI, targetIndex
 
 func showDocs(message string, docs map[string]json.RawMessage) {
 	count := 0
-	for k, _ := range docs {
+	for k := range docs {
 		count++
 		if count > 50 {
 			break
@@ -389,7 +394,6 @@ func (m *Migrator) SyncBetweenIndex(srcEsApi ESAPI, dstEsApi ESAPI, cfg *Config)
 	dstType := ""
 	var srcScroll ScrollAPI = nil
 	var dstScroll ScrollAPI = nil
-	//var emptyScroll = &EmptyScroll{}
 	lastSrcId := ""
 	lastDestId := ""
 	needScrollSrc := true
@@ -592,10 +596,10 @@ func (m *Migrator) SyncBetweenIndex(srcEsApi ESAPI, dstEsApi ESAPI, cfg *Config)
 			needScrollSrc = false
 			needScrollDest = true
 		}
-		if needScrollSrc == true && len(srcScroll.GetDocs()) == 0 {
+		if needScrollSrc && len(srcScroll.GetDocs()) == 0 {
 			needScrollSrc = false
 		}
-		if needScrollDest == true && len(dstScroll.GetDocs()) == 0 {
+		if needScrollDest && len(dstScroll.GetDocs()) == 0 {
 			needScrollDest = false
 		}
 

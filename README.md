@@ -126,12 +126,6 @@ migrate 5.x to 6.x and unify all the types to `doc`
 
 ```
 
-to migrate version 7.x and you may need to rename `_type` to `_doc`
-```
-./esm -s http://localhost:9201 -x "source" -y "target"  -d https://localhost:9200 --rename="_type:type,age:myage"  -u"_doc"
-
-```
-
 filter migration with range query
 
 ```
@@ -154,12 +148,6 @@ select source fields
 
 ```
  ./bin/esm -s http://localhost:9201 -x my_index -o dump.json --fields=author,title
-```
-
-rename fields while do bulk indexing
-
-```
-./bin/esm -i dump.json -d  http://localhost:9201 -y target-index41  --rename=title:newtitle
 ```
 
 user buffer_count to control memory used by ESM， and use gzip to compress network traffic
@@ -210,55 +198,94 @@ Usage:
   esm [OPTIONS]
 
 Application Options:
-  -s, --source=                    source elasticsearch instance, ie: http://localhost:9200
-  -q, --query=                     query against source elasticsearch instance, filter data before migrate, ie: name:medcl
-      --sort=                      sort field when scroll, ie: _id (default: _id)
-  -d, --dest=                      destination elasticsearch instance, ie: http://localhost:9201
-  -m, --source_auth=               basic auth of source elasticsearch instance, ie: user:pass
-  -n, --dest_auth=                 basic auth of target elasticsearch instance, ie: user:pass
-      --source_api_key=            api key of source elasticsearch instance (base64 encoded id:api_key), used instead of source_auth
-      --dest_api_key=              api key of target elasticsearch instance (base64 encoded id:api_key), used instead of dest_auth
-  -c, --count=                     number of documents at a time: ie "size" in the scroll request (10000)
-      --buffer_count=              number of buffered documents in memory (100000)
-  -w, --workers=                   concurrency number for bulk workers (1)
-  -b, --bulk_size=                 bulk size in MB (5)
-  -t, --time=                      scroll time (1m)
-      --sliced_scroll_size=        size of sliced scroll, to make it work, the size should be > 1 (1)
+  -s, --source=                    source elasticsearch instance, ie:
+                                   http://localhost:9200
+  -q, --query=                     query against source elasticsearch instance,
+                                   filter data before migrate, ie: name:medcl
+      --sort=                      sort field when scroll, ie: _id (default:
+                                   _id)
+  -d, --dest=                      destination elasticsearch instance, ie:
+                                   http://localhost:9201
+  -m, --source_auth=               basic auth of source elasticsearch instance,
+                                   ie: user:pass
+  -n, --dest_auth=                 basic auth of target elasticsearch instance,
+                                   ie: user:pass
+      --source_api_key=            api key of source elasticsearch instance
+                                   (base64 encoded id:api_key), used instead of
+                                   source_auth
+      --dest_api_key=              api key of target elasticsearch instance
+                                   (base64 encoded id:api_key), used instead of
+                                   dest_auth
+  -c, --count=                     number of documents at a time: ie "size" in
+                                   the scroll request (default: 10000)
+      --buffer_count=              number of buffered documents in memory
+                                   (default: 1000000)
+  -w, --workers=                   concurrency number for bulk workers
+                                   (default: 1)
+  -b, --bulk_size=                 bulk size in MB (default: 5)
+  -t, --time=                      scroll time (default: 10m)
+      --sliced_scroll_size=        size of sliced scroll, to make it work, the
+                                   size should be > 1 (default: 1)
   -f, --force                      delete destination index before copying
   -a, --all                        copy indexes starting with . and _
       --copy_settings              copy index settings from source
       --copy_mappings              copy index mappings from source
-      --shards=                    set a number of shards on newly created indexes
-  -x, --src_indexes=               indexes name to copy,support regex and comma separated list (_all)
-  -y, --dest_index=                indexes name to save, allow only one indexname, original indexname will be used if not specified
+      --shards=                    set a number of shards on newly created
+                                   indexes
+  -x, --src_indexes=               indexes name to copy,support regex and comma
+                                   separated list (default: _all)
+  -y, --dest_index=                indexes name to save, allow only one
+                                   indexname, original indexname will be used
+                                   if not specified
   -u, --type_override=             override type name
-      --green                      wait for both hosts cluster status to be green before dump. otherwise yellow is okay
-  -v, --log=                       setting log level,options:trace,debug,info,warn,error (INFO)
-  -o, --output_file=               output documents of source index into local file
-      --truncate_output=           truncate before dump to output file
+      --green                      wait for both hosts cluster status to be
+                                   green before dump. otherwise yellow is okay
+  -v, --log=                       setting log
+                                   level,options:trace,debug,info,warn,error
+                                   (default: INFO)
+  -o, --output_file=               output documents of source index into local
+                                   file
+      --truncate_output            truncate before dump to output file
   -i, --input_file=                indexing from local dump file
-      --input_file_type=           the data type of input file, options: dump, json_line, json_array, log_line (dump)
-      --source_proxy=              set proxy to source http connections, ie: http://127.0.0.1:8080
-      --dest_proxy=                set proxy to target http connections, ie: http://127.0.0.1:8080
+      --source_proxy=              set proxy to source http connections, ie:
+                                   http://127.0.0.1:8080
+      --dest_proxy=                set proxy to target http connections, ie:
+                                   http://127.0.0.1:8080
       --refresh                    refresh after migration finished
-      --sync=                      sync will use scroll for both source and target index, compare the data and sync(index/update/delete)
-      --fields=                    filter source fields(white list), comma separated, ie: col1,col2,col3,...
-      --skip=                      skip source fields(black list), comma separated, ie: col1,col2,col3,...
-      --rename=                    rename source fields, comma separated, ie: _type:type, name:myname
-  -l, --logstash_endpoint=         target logstash tcp endpoint, ie: 127.0.0.1:5055
-      --secured_logstash_endpoint  target logstash tcp endpoint was secured by TLS
-      --repeat_times=              repeat the data from source N times to dest output, use align with parameter regenerate_id to amplify the data size
-  -r, --regenerate_id              regenerate id for documents, this will override the exist document id in data source
+      --sync                       sync will use scroll for both source and
+                                   target index, compare the data and
+                                   sync(index/update/delete)
+      --fields=                    filter source fields(white list), comma
+                                   separated, ie: col1,col2,col3,...
+      --skip=                      skip source fields(black list), comma
+                                   separated, ie: col1,col2,col3,...
+      --repeat_times=              repeat the data from source N times to dest
+                                   output, use align with parameter
+                                   regenerate_id to amplify the data size
+  -r, --regenerate_id              regenerate id for documents, this will
+                                   override the exist document id in data source
       --compress                   use gzip to compress traffic
-  -p, --sleep=                     sleep N seconds after finished a bulk request (-1)
-      --max_retries=               max retries of a failed bulk or scroll request (429/502/503/504 or network error), with exponential backoff (5)
-      --failed_output=             append documents that failed to index to this file, it can be re-imported with -i
-      --skip_count_check           skip comparing the document counts of source and target indexes after migration
+  -p, --sleep=                     sleep N seconds after each bulk request
+                                   (default: -1)
+      --diff_counts                count the difference between source and
+                                   target indexes
+      --remain_routing_allocation  keep routing allocation in mappings
+      --only_meta                  only sync meta
+      --dry                        only dry
+      --enable_delete              enable delete records in dest index if there
+                                   are more records
+      --ignore_content_compare     ignore to compare the content of a record
+      --max_retries=               max retries of a failed bulk or scroll
+                                   request (429/502/503/504 or network error),
+                                   with exponential backoff (default: 5)
+      --failed_output=             append documents that failed to index to
+                                   this file, it can be re-imported with -i
+      --skip_count_check           skip comparing the document counts of source
+                                   and target indexes after migration
+      --version                    print the esm version and exit
 
 Help Options:
   -h, --help                       Show this help message
-
-
 ```
 
 ## FAQ

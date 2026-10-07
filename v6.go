@@ -23,7 +23,6 @@ import (
 	"fmt"
 	log "github.com/cihub/seelog"
 	"io"
-	"io/ioutil"
 	"regexp"
 	"strings"
 	//"infini.sh/framework/core/util"
@@ -96,6 +95,10 @@ func (s *ESAPIV6) NextScroll(scrollTime string, scrollId string) (ScrollAPI, err
 
 	url := fmt.Sprintf("%s/_search/scroll?scroll=%s&scroll_id=%s", s.Host, scrollTime, id)
 	body, err := Request(s.Compress, "GET", url, s.Auth, nil, s.HttpProxy)
+	if err != nil {
+		// logged and retried by the caller
+		return nil, err
+	}
 
 	// decode elasticsearch scroll response
 	scroll := &Scroll{}
@@ -113,7 +116,7 @@ func (s *ESAPIV6) GetIndexMappings(copyAllIndexes bool, indexNames string) (stri
 	resp, body, errs := Get(url, s.Auth, s.HttpProxy)
 
 	if resp != nil && resp.Body != nil {
-		io.Copy(ioutil.Discard, resp.Body)
+		io.Copy(io.Discard, resp.Body)
 		defer resp.Body.Close()
 	}
 
@@ -180,7 +183,7 @@ func (s *ESAPIV6) UpdateIndexMapping(indexName string, settings map[string]inter
 
 	delete(settings, "dynamic_templates")
 
-	for name, _ := range settings {
+	for name := range settings {
 
 		log.Debug("start update mapping: ", indexName, ", ", settings)
 

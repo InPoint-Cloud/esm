@@ -23,7 +23,6 @@ import (
 	log "github.com/cihub/seelog"
 	"io"
 	"os"
-	"strings"
 	"sync"
 )
 
@@ -95,63 +94,28 @@ func (c *Migrator) NewFileDumpWorker(pb *pb.ProgressBar, wg *sync.WaitGroup) {
 	}
 
 	w := bufio.NewWriter(f)
-	skipFields := make([]string, 0)
-	if len(c.Config.SkipFields) > 0 {
-		//skip fields
-		if !strings.Contains(c.Config.SkipFields, ",") {
-			skipFields = append(skipFields, c.Config.SkipFields)
-		} else {
-			fields := strings.Split(c.Config.SkipFields, ",")
-			for _, field := range fields {
-				skipFields = append(skipFields, field)
-			}
-		}
-	}
+	skipFields := splitFieldList(c.Config.SkipFields)
 
-	//READ_DOCS:
-	for {
-		docI, open := <-c.DocChan
-		// this check is in case the document is an error with scroll stuff
-		/*
-			if status, ok := docI["status"]; ok {
-				if status.(int) == 404 {
-					log.Error("error: ", docI["response"])
-					continue
-				}
-			}
-		*/
-		// sanity check
-		/*
-			for _, key := range []string{"_index", "_type", "_source", "_id"} {
-				if _, ok := docI[key]; !ok {
-					break READ_DOCS
-				}
-			}
-			for _, key := range skipFields {
-				if _, found := docI[key]; found {
-					delete(docI, key)
-				}
-			}
-		*/
+	for docI := range c.DocChan {
+		if source, err := removeSourceFields(docI.Source, skipFields); err != nil {
+			log.Error(err)
+		} else {
+			docI.Source = source
+		}
+
 		jsr, err := json.Marshal(docI)
 		log.Trace(string(jsr))
 		if err != nil {
 			log.Error(err)
+			continue
 		}
-		n, err := w.WriteString(string(jsr))
-		if err != nil {
-			log.Error(n, err)
+		w.Write(jsr)
+		if err := w.WriteByte('\n'); err != nil {
+			log.Error(err)
 		}
-		w.WriteString("\n")
 		pb.Increment()
-
-		// if channel is closed flush and gtfo
-		if !open {
-			goto WORKER_DONE
-		}
 	}
 
-WORKER_DONE:
 	w.Flush()
 	f.Close()
 

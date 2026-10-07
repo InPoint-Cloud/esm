@@ -126,43 +126,39 @@ type Migrator struct {
 type Config struct {
 
 	// config options
-	SourceEs            string `short:"s" long:"source"  description:"source elasticsearch instance, ie: http://localhost:9200"`
-	Query               string `short:"q" long:"query"  description:"query against source elasticsearch instance, filter data before migrate, ie: name:medcl"`
-	SortField           string `long:"sort" description:"sort field when scroll, ie: _id" default:"_id"`
-	TargetEs            string `short:"d" long:"dest"    description:"destination elasticsearch instance, ie: http://localhost:9201"`
-	SourceEsAuthStr     string `short:"m" long:"source_auth"  description:"basic auth of source elasticsearch instance, ie: user:pass"`
-	TargetEsAuthStr     string `short:"n" long:"dest_auth"  description:"basic auth of target elasticsearch instance, ie: user:pass"`
-	SourceEsApiKey      string `long:"source_api_key"  description:"api key of source elasticsearch instance (base64 encoded id:api_key), used instead of source_auth"`
-	TargetEsApiKey      string `long:"dest_api_key"  description:"api key of target elasticsearch instance (base64 encoded id:api_key), used instead of dest_auth"`
-	DocBufferCount      int    `short:"c" long:"count"   description:"number of documents at a time: ie \"size\" in the scroll request" default:"10000"`
-	BufferCount         int    `long:"buffer_count"   description:"number of buffered documents in memory" default:"1000000"`
-	Workers             int    `short:"w" long:"workers" description:"concurrency number for bulk workers" default:"1"`
-	BulkSizeInMB        int    `short:"b" long:"bulk_size" description:"bulk size in MB" default:"5"`
-	ScrollTime          string `short:"t" long:"time"    description:"scroll time" default:"10m"`
-	ScrollSliceSize     int    `long:"sliced_scroll_size"    description:"size of sliced scroll, to make it work, the size should be > 1" default:"1"`
-	RecreateIndex       bool   `short:"f" long:"force"   description:"delete destination index before copying"`
-	CopyAllIndexes      bool   `short:"a" long:"all"     description:"copy indexes starting with . and _"`
-	CopyIndexSettings   bool   `long:"copy_settings"          description:"copy index settings from source"`
-	CopyIndexMappings   bool   `long:"copy_mappings"          description:"copy index mappings from source"`
-	ShardsCount         int    `long:"shards"            description:"set a number of shards on newly created indexes"`
-	SourceIndexNames    string `short:"x" long:"src_indexes" description:"indexes name to copy,support regex and comma separated list" default:"_all"`
-	TargetIndexName     string `short:"y" long:"dest_index" description:"indexes name to save, allow only one indexname, original indexname will be used if not specified" default:""`
-	OverrideTypeName    string `short:"u" long:"type_override" description:"override type name" default:""`
-	WaitForGreen        bool   `long:"green"             description:"wait for both hosts cluster status to be green before dump. otherwise yellow is okay"`
-	LogLevel            string `short:"v" long:"log"            description:"setting log level,options:trace,debug,info,warn,error"  default:"INFO"`
-	DumpOutFile         string `short:"o" long:"output_file"            description:"output documents of source index into local file" `
-	TruncateOutFile     bool   `long:"truncate_output" description:"truncate before dump to output file" `
-	DumpInputFile       string `short:"i" long:"input_file"            description:"indexing from local dump file" `
-	InputFileType       string `long:"input_file_type"                 description:"the data type of input file, options: dump, json_line, json_array, log_line" default:"dump" `
-	SourceProxy         string `long:"source_proxy"            description:"set proxy to source http connections, ie: http://127.0.0.1:8080"`
-	TargetProxy         string `long:"dest_proxy"            description:"set proxy to target http connections, ie: http://127.0.0.1:8080"`
-	Refresh             bool   `long:"refresh"                 description:"refresh after migration finished"`
-	Sync                bool   `long:"sync"                   description:"sync will use scroll for both source and target index, compare the data and sync(index/update/delete)"`
-	Fields              string `long:"fields"                 description:"filter source fields(white list), comma separated, ie: col1,col2,col3,..." `
-	SkipFields          string `long:"skip"                   description:"skip source fields(black list), comma separated, ie: col1,col2,col3,..." `
-	RenameFields        string `long:"rename"                 description:"rename source fields, comma separated, ie: _type:type, name:myname" `
-	LogstashEndpoint    string `short:"l"  long:"logstash_endpoint"    description:"target logstash tcp endpoint, ie: 127.0.0.1:5055" `
-	LogstashSecEndpoint bool   `long:"secured_logstash_endpoint"    description:"target logstash tcp endpoint was secured by TLS" `
+	SourceEs          string `short:"s" long:"source"  description:"source elasticsearch instance, ie: http://localhost:9200"`
+	Query             string `short:"q" long:"query"  description:"query against source elasticsearch instance, filter data before migrate, ie: name:medcl"`
+	SortField         string `long:"sort" description:"sort field when scroll, ie: _id" default:"_id"`
+	TargetEs          string `short:"d" long:"dest"    description:"destination elasticsearch instance, ie: http://localhost:9201"`
+	SourceEsAuthStr   string `short:"m" long:"source_auth"  description:"basic auth of source elasticsearch instance, ie: user:pass"`
+	TargetEsAuthStr   string `short:"n" long:"dest_auth"  description:"basic auth of target elasticsearch instance, ie: user:pass"`
+	SourceEsApiKey    string `long:"source_api_key"  description:"api key of source elasticsearch instance (base64 encoded id:api_key), used instead of source_auth"`
+	TargetEsApiKey    string `long:"dest_api_key"  description:"api key of target elasticsearch instance (base64 encoded id:api_key), used instead of dest_auth"`
+	DocBufferCount    int    `short:"c" long:"count"   description:"number of documents at a time: ie \"size\" in the scroll request" default:"10000"`
+	BufferCount       int    `long:"buffer_count"   description:"number of buffered documents in memory" default:"1000000"`
+	Workers           int    `short:"w" long:"workers" description:"concurrency number for bulk workers" default:"1"`
+	BulkSizeInMB      int    `short:"b" long:"bulk_size" description:"bulk size in MB" default:"5"`
+	ScrollTime        string `short:"t" long:"time"    description:"scroll time" default:"10m"`
+	ScrollSliceSize   int    `long:"sliced_scroll_size"    description:"size of sliced scroll, to make it work, the size should be > 1" default:"1"`
+	RecreateIndex     bool   `short:"f" long:"force"   description:"delete destination index before copying"`
+	CopyAllIndexes    bool   `short:"a" long:"all"     description:"copy indexes starting with . and _"`
+	CopyIndexSettings bool   `long:"copy_settings"          description:"copy index settings from source"`
+	CopyIndexMappings bool   `long:"copy_mappings"          description:"copy index mappings from source"`
+	ShardsCount       int    `long:"shards"            description:"set a number of shards on newly created indexes"`
+	SourceIndexNames  string `short:"x" long:"src_indexes" description:"indexes name to copy,support regex and comma separated list" default:"_all"`
+	TargetIndexName   string `short:"y" long:"dest_index" description:"indexes name to save, allow only one indexname, original indexname will be used if not specified" default:""`
+	OverrideTypeName  string `short:"u" long:"type_override" description:"override type name" default:""`
+	WaitForGreen      bool   `long:"green"             description:"wait for both hosts cluster status to be green before dump. otherwise yellow is okay"`
+	LogLevel          string `short:"v" long:"log"            description:"setting log level,options:trace,debug,info,warn,error"  default:"INFO"`
+	DumpOutFile       string `short:"o" long:"output_file"            description:"output documents of source index into local file" `
+	TruncateOutFile   bool   `long:"truncate_output" description:"truncate before dump to output file" `
+	DumpInputFile     string `short:"i" long:"input_file"            description:"indexing from local dump file" `
+	SourceProxy       string `long:"source_proxy"            description:"set proxy to source http connections, ie: http://127.0.0.1:8080"`
+	TargetProxy       string `long:"dest_proxy"            description:"set proxy to target http connections, ie: http://127.0.0.1:8080"`
+	Refresh           bool   `long:"refresh"                 description:"refresh after migration finished"`
+	Sync              bool   `long:"sync"                   description:"sync will use scroll for both source and target index, compare the data and sync(index/update/delete)"`
+	Fields            string `long:"fields"                 description:"filter source fields(white list), comma separated, ie: col1,col2,col3,..." `
+	SkipFields        string `long:"skip"                   description:"skip source fields(black list), comma separated, ie: col1,col2,col3,..." `
 
 	RepeatOutputTimes              int    `long:"repeat_times"            description:"repeat the data from source N times to dest output, use align with parameter regenerate_id to amplify the data size "`
 	RegenerateID                   bool   `short:"r" long:"regenerate_id"   description:"regenerate id for documents, this will override the exist document id in data source"`
@@ -174,7 +170,6 @@ type Config struct {
 	Dry                            bool   `long:"dry" description:"only dry"`
 	EnableDelete                   bool   `long:"enable_delete"          description:"enable delete records in dest index if there are more records"`
 	IgnoreContentCompare           bool   `long:"ignore_content_compare" description:"ignore to compare the content of a record"`
-	IgnoreFieldsInCompare          string `long:"ignore_compare_fields" description:"fields to ignore when compare documents, comma separated, ie: col1,col2,col3,..." `
 	MaxRetries                     int    `long:"max_retries" description:"max retries of a failed bulk or scroll request (429/502/503/504 or network error), with exponential backoff" default:"5"`
 	FailedOutputFile               string `long:"failed_output" description:"append documents that failed to index to this file, it can be re-imported with -i"`
 	SkipCountCheck                 bool   `long:"skip_count_check" description:"skip comparing the document counts of source and target indexes after migration"`

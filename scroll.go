@@ -82,7 +82,7 @@ func (s *Scroll) Next(c *Migrator, bar *pb.ProgressBar) (done bool) {
 	}
 
 	docs := scroll.GetDocs()
-	if docs == nil || len(docs) <= 0 {
+	if len(docs) == 0 {
 		log.Debug("scroll result is empty")
 		return true
 	}
@@ -123,7 +123,7 @@ func (s *ScrollV7) Next(c *Migrator, bar *pb.ProgressBar) (done bool) {
 	}
 
 	docs := scroll.GetDocs()
-	if docs == nil || len(docs) <= 0 {
+	if len(docs) == 0 {
 		log.Debug("scroll result is empty")
 		return true
 	}
@@ -134,29 +134,4 @@ func (s *ScrollV7) Next(c *Migrator, bar *pb.ProgressBar) (done bool) {
 	s.ScrollId = scroll.GetScrollId()
 
 	return
-}
-
-// 返回空,从而在 compare + bulk 时有相同的处理逻辑
-type EmptyScroll struct {
-	Dummy int
-}
-
-func (es *EmptyScroll) GetScrollId() string {
-	return ""
-}
-
-func (es *EmptyScroll) GetHitsTotal() int {
-	return 0
-}
-
-func (es *EmptyScroll) GetDocs() []interface{} {
-	return make([]interface{}, 0)
-}
-
-func (es *EmptyScroll) ProcessScrollResult(c *Migrator, bar *pb.ProgressBar) {
-
-}
-
-func (es *EmptyScroll) Next(c *Migrator, bar *pb.ProgressBar) (done bool) {
-	return true
 }

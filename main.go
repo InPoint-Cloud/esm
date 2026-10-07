@@ -14,6 +14,7 @@ import (
 	"runtime"
 	_ "runtime/pprof"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -165,7 +166,7 @@ func run() int {
 			migrator.DocChan = make(chan Document, c.BufferCount)
 
 			//var srcESVersion *ClusterVersion
-			// create a progressbar and start a docCount
+			// create a progressbar
 			var outputBar *pb.ProgressBar = pb.New(1).Prefix("Output ")
 
 			var fetchBar = pb.New(1).Prefix("Scroll")
@@ -227,7 +228,7 @@ func run() int {
 							scroll.ProcessScrollResult(&migrator, fetchBar)
 
 							// loop scrolling until done
-							for scroll.Next(&migrator, fetchBar) == false {
+							for !scroll.Next(&migrator, fetchBar) {
 							}
 						}()
 					}
@@ -508,10 +509,9 @@ func run() int {
 			if len(c.TargetEs) > 0 {
 				log.Debug("start es bulk workers")
 				outputBar.Prefix("Bulk")
-				var docCount int
 				wg.Add(c.Workers)
 				for i := 0; i < c.Workers; i++ {
-					go migrator.NewBulkWorker(&docCount, outputBar, &wg)
+					go migrator.NewBulkWorker(outputBar, &wg)
 				}
 			} else if len(c.DumpOutFile) > 0 {
 				// start file write
@@ -536,7 +536,14 @@ func run() int {
 	log.Info("data migration finished.")
 	restoreIndexSettings()
 
-	if len(c.TargetEs) == 0 || c.OnlyMeta {
+	if c.OnlyMeta {
+		return 0
+	}
+	if len(c.TargetEs) == 0 {
+		if atomic.LoadInt32(&migrator.Stats.ReadFailed) > 0 {
+			log.Error("reading from source failed, the output file is incomplete")
+			return 1
+		}
 		return 0
 	}
 	exitCode := 0

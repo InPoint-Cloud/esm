@@ -91,6 +91,10 @@ func (s *ESAPIV5) NextScroll(scrollTime string, scrollId string) (ScrollAPI, err
 	url := fmt.Sprintf("%s/_search/scroll?scroll=%s&scroll_id=%s", s.Host, scrollTime, id)
 
 	body, err := Request(s.Compress, "GET", url, s.Auth, nil, s.HttpProxy)
+	if err != nil {
+		// logged and retried by the caller
+		return nil, err
+	}
 
 	// decode elasticsearch scroll response
 	scroll := &Scroll{}
