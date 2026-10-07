@@ -2,7 +2,7 @@
 
 The section of a release is used as the description of its GitHub release.
 
-## Unreleased
+## v0.10.0
 
 ### Fixed
 - `--copy_mappings` without `--copy_settings` was ignored, the mappings are copied now.
