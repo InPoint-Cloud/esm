@@ -26,6 +26,7 @@ import (
 	"io"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -225,6 +226,8 @@ func (m *Migrator) NewBulkWorker(pb *pb.ProgressBar, wg *sync.WaitGroup) {
 	defer taskTimeout.Stop()
 
 	haveTypeField := !m.targetIsTypeless()
+	// 7.x accepts documents without a type, older versions require one
+	targetNeedsType := haveTypeField && majorVersion(m.TargetESAPI.ClusterVersion()) < 7
 	skipFields := splitFieldList(m.Config.SkipFields)
 
 	flush := func() {
@@ -270,7 +273,7 @@ READ_DOCS:
 			}
 
 			// sanity check
-			if len(doc.Index) == 0 || len(doc.Type) == 0 && haveTypeField {
+			if len(doc.Index) == 0 || len(doc.Type) == 0 && targetNeedsType {
 				log.Errorf("failed decoding document: %+v", doc)
 				continue
 			}
@@ -415,6 +418,7 @@ func (m *Migrator) SyncBetweenIndex(srcEsApi ESAPI, dstEsApi ESAPI, cfg *Config)
 				cfg.SortField, 0, cfg.ScrollSliceSize, cfg.Fields)
 			if err != nil {
 				log.Errorf("can not scroll for source index: %s, reason:%s", cfg.SourceIndexNames, err.Error())
+				atomic.StoreInt32(&m.Stats.ReadFailed, 1)
 				return
 			}
 			log.Infof("src total count=%d", srcScroll.GetHitsTotal())
@@ -440,9 +444,11 @@ func (m *Migrator) SyncBetweenIndex(srcEsApi ESAPI, dstEsApi ESAPI, cfg *Config)
 				if strings.Contains(err.Error(), "indices.id_field_data.enabled") {
 					log.Errorf("can not scroll dest index %s sorted by %s, please enable the cluster setting "+
 						"indices.id_field_data.enabled on the target, reason:%s", cfg.TargetIndexName, cfg.SortField, err.Error())
+					atomic.StoreInt32(&m.Stats.ReadFailed, 1)
 					return
 				}
 				log.Errorf("can not scroll for dest index: %s, , reason:%s", cfg.TargetIndexName, err.Error())
+				atomic.StoreInt32(&m.Stats.ReadFailed, 1)
 				return
 			} else {
 				//有 dest index,
@@ -468,6 +474,9 @@ func (m *Migrator) SyncBetweenIndex(srcEsApi ESAPI, dstEsApi ESAPI, cfg *Config)
 			start := time.Now()
 			for idx, dstDoc := range dstScroll.GetDocs() {
 				destId := dstDoc.Id
+				if dstDoc.Type != "" {
+					dstType = dstDoc.Type
+				}
 				dstSource := dstDoc.Source
 				lastDestId = destId
 				log.Debugf("dst [%d]: dstId=%s", dstRecordIndex+idx, destId)
@@ -506,7 +515,9 @@ func (m *Migrator) SyncBetweenIndex(srcEsApi ESAPI, dstEsApi ESAPI, cfg *Config)
 			for idx, srcDoc := range srcScroll.GetDocs() {
 				srcId := srcDoc.Id
 				srcSource := srcDoc.Source
-				//srcType = srcDocI.(map[string]interface{})["_type"].(string)
+				if srcDoc.Type != "" {
+					srcType = srcDoc.Type
+				}
 				lastSrcId = srcId
 				log.Debugf("src [%d]: srcId=%s", srcRecordIndex+idx, srcId)
 
@@ -564,7 +575,7 @@ func (m *Migrator) SyncBetweenIndex(srcEsApi ESAPI, dstEsApi ESAPI, cfg *Config)
 			// dst 已经中已经没有更多的记录, 可以直接将所有的 src 都同步到 dst 中了,避免其中保存太多
 			addCount += len(srcDocMaps)
 			if !cfg.Dry {
-				_ = m.bulkRecords(opIndex, dstEsApi, cfg.TargetIndexName, dstType, srcDocMaps)
+				_ = m.bulkRecords(opIndex, dstEsApi, cfg.TargetIndexName, srcType, srcDocMaps)
 			} else {
 				showDocs("insert", srcDocMaps)
 			}
@@ -627,7 +638,7 @@ func (m *Migrator) SyncBetweenIndex(srcEsApi ESAPI, dstEsApi ESAPI, cfg *Config)
 				//最后在 dst 中还有遗留的,表示 dst 中多的.需要删除
 				deleteCount += len(dstDocMaps)
 				if !cfg.Dry && cfg.EnableDelete {
-					_ = m.bulkRecords(opDelete, dstEsApi, cfg.TargetIndexName, srcType, dstDocMaps)
+					_ = m.bulkRecords(opDelete, dstEsApi, cfg.TargetIndexName, dstType, dstDocMaps)
 				}
 				if cfg.Dry {
 					showDocs("delete", dstDocMaps)

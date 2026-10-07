@@ -186,7 +186,6 @@ func (s *ESAPIV7) GetIndexMappings(copyAllIndexes bool, indexNames string) (stri
 	// wrap in mappings if moving from super old es
 	for name, idx := range idxs {
 		i++
-		fmt.Println(name)
 		if _, ok := idx.(map[string]interface{})["mappings"]; !ok {
 			(idxs)[name] = map[string]interface{}{
 				"mappings": idx,

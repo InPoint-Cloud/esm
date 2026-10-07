@@ -18,7 +18,6 @@ package main
 
 import (
 	"encoding/json"
-	"sync"
 )
 
 type Indexes map[string]interface{}
@@ -113,7 +112,6 @@ type Action struct {
 }
 
 type Migrator struct {
-	FlushLock   sync.Mutex
 	DocChan     chan Document
 	SourceESAPI ESAPI
 	TargetESAPI ESAPI
@@ -121,6 +119,9 @@ type Migrator struct {
 	TargetAuth  *Auth
 	Config      *Config
 	Stats       MigrationStats
+
+	// settings changed during the migration (refresh_interval, number_of_replicas), restored when finished
+	settingsToRestore []map[string]interface{}
 }
 
 type Config struct {
