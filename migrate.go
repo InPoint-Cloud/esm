@@ -123,7 +123,7 @@ func (m *Migrator) startScrollReaders(wg *sync.WaitGroup, fetchBar, outputBar *p
 	c := m.Config
 	m.SourceESAPI = m.ParseEsApi(true, c.SourceEs, c.SourceEsAuthStr, c.SourceEsApiKey, c.SourceProxy)
 	if m.SourceESAPI == nil {
-		return fmt.Errorf("can not parse source es api")
+		return fmt.Errorf("can not connect to the source elasticsearch")
 	}
 
 	// sorting on _id needs fielddata, which is disabled by default since 8.0
@@ -209,7 +209,7 @@ func (m *Migrator) prepareTarget() error {
 	c := m.Config
 	m.TargetESAPI = m.ParseEsApi(false, c.TargetEs, c.TargetEsAuthStr, c.TargetEsApiKey, c.TargetProxy)
 	if m.TargetESAPI == nil {
-		return fmt.Errorf("can not parse target es api")
+		return fmt.Errorf("can not connect to the target elasticsearch")
 	}
 
 	// mappings from 7.x+ are typeless and can be copied across major versions,

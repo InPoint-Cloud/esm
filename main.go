@@ -81,12 +81,12 @@ func (m *Migrator) connect() bool {
 	c := m.Config
 	m.SourceESAPI = m.ParseEsApi(true, c.SourceEs, c.SourceEsAuthStr, c.SourceEsApiKey, c.SourceProxy)
 	if m.SourceESAPI == nil {
-		log.Error("can not parse source es api")
+		log.Error("can not connect to the source elasticsearch")
 		return false
 	}
 	m.TargetESAPI = m.ParseEsApi(false, c.TargetEs, c.TargetEsAuthStr, c.TargetEsApiKey, c.TargetProxy)
 	if m.TargetESAPI == nil {
-		log.Error("can not parse target es api")
+		log.Error("can not connect to the target elasticsearch")
 		return false
 	}
 	return true

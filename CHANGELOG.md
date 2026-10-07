@@ -16,6 +16,8 @@ The section of a release is used as the description of its GitHub release.
 
 ### Changed
 - Tests cover all supported versions (1.x to 9.x), `--sync`, settings and mappings, auth, proxies and retries.
+- Integration tests against real 7.x, 8.x and 9.x clusters (`scripts/integration-test.sh`), run by CI.
+- "can not connect to the source/target elasticsearch" instead of "can not parse source/target es api".
 - The code comments are in English, the README examples are updated.
 
 ## v0.9.0

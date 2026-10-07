@@ -186,6 +186,18 @@ if there is no download for your platform, compile it yourself, `go` is required
 `go build -o esm .`
 * go version >= 1.26
 
+## Testing
+
+`go test ./...` runs the unit tests and the end to end tests against an in-memory fake elasticsearch, in about a second.
+The integration tests run against real clusters in containers (podman or docker):
+
+```
+scripts/integration-test.sh 7.17.28 8.19.23          # source version, target version
+scripts/integration-test.sh 8.19.23 9.5.5 secure     # target with security, https and a self-signed certificate
+```
+
+CI runs both on every push and pull request.
+
 ## Releasing
 Releases are built by GoReleaser in GitHub Actions (`.github/workflows/Release.yml`).
 Push a semver tag and the workflow builds linux/darwin/windows binaries for amd64 and arm64,

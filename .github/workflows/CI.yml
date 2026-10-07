@@ -28,3 +28,27 @@ jobs:
 
       - name: Test
         run: go test -race ./...
+
+  # real clusters in containers, see scripts/integration-test.sh
+  integration:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { source: 7.17.28, target: 8.19.23, secure: "" }
+          - { source: 8.19.23, target: 9.5.5, secure: secure }
+    name: integration ${{ matrix.source }} to ${{ matrix.target }} ${{ matrix.secure }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Integration tests
+        run: scripts/integration-test.sh ${{ matrix.source }} ${{ matrix.target }} ${{ matrix.secure }}
+        env:
+          CONTAINER_CLI: docker
