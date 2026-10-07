@@ -20,6 +20,7 @@ type mockES struct {
 	version     string // cluster version, ie: 7.10.2
 	docs        int    // number of documents in the index
 	scrollError int    // if set, scroll requests after the first page answer with this status code
+	tls         bool   // serve https with a self-signed certificate
 
 	mu   sync.Mutex
 	bulk []string // source lines of all bulk requests
@@ -27,7 +28,11 @@ type mockES struct {
 
 func (m *mockES) start(t *testing.T) string {
 	t.Helper()
-	srv := httptest.NewServer(http.HandlerFunc(m.handle))
+	newServer := httptest.NewServer
+	if m.tls {
+		newServer = httptest.NewTLSServer
+	}
+	srv := newServer(http.HandlerFunc(m.handle))
 	t.Cleanup(srv.Close)
 	return srv.URL
 }
@@ -126,7 +131,7 @@ func checkDocs(t *testing.T, lines []string, want int, skipped string) {
 		if !strings.Contains(l, `"n":`) {
 			t.Fatalf("not a document: %q", l)
 		}
-		if strings.Contains(l, `"`+skipped+`"`) {
+		if skipped != "" && strings.Contains(l, `"`+skipped+`"`) {
 			t.Fatalf("skipped field %q still present: %q", skipped, l)
 		}
 	}
@@ -186,5 +191,36 @@ func TestScrollErrorFailsDump(t *testing.T) {
 func TestVersionFlag(t *testing.T) {
 	if code := run([]string{"--version"}); code != 0 {
 		t.Fatalf("exit code %d", code)
+	}
+}
+
+func TestTLSVerification(t *testing.T) {
+	es := &mockES{version: "7.10.2", docs: 10, tls: true}
+	url := es.start(t)
+
+	out := filepath.Join(t.TempDir(), "dump.json")
+	if code := run([]string{"-s", url, "-x", "src", "-o", out}); code != 1 {
+		t.Fatalf("exit code %d, want 1 for a self-signed certificate", code)
+	}
+	if code := run([]string{"-s", url, "-x", "src", "-o", out, "--insecure"}); code != 0 {
+		t.Fatalf("exit code %d with --insecure", code)
+	}
+	checkDocs(t, readLines(t, out), 10, "")
+}
+
+func TestLogFile(t *testing.T) {
+	es := &mockES{version: "7.10.2", docs: 10}
+	dir := t.TempDir()
+	logFile := filepath.Join(dir, "esm.log")
+
+	if code := run([]string{"-s", es.start(t), "-x", "src", "-o", filepath.Join(dir, "dump.json"), "--log_file", logFile}); code != 0 {
+		t.Fatalf("exit code %d", code)
+	}
+	b, err := os.ReadFile(logFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), "source es version: 7.10.2") {
+		t.Errorf("log file misses the info output:\n%s", b)
 	}
 }

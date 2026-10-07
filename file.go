@@ -19,8 +19,8 @@ package main
 import (
 	"bufio"
 	"encoding/json"
+	log "github.com/InPoint-Cloud/esm/internal/log"
 	"github.com/cheggaaa/pb"
-	log "github.com/cihub/seelog"
 	"io"
 	"os"
 	"sync"

@@ -20,7 +20,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	log "github.com/cihub/seelog"
+	log "github.com/InPoint-Cloud/esm/internal/log"
 	"strings"
 )
 

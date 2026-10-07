@@ -3,8 +3,8 @@ package main
 import (
 	"bufio"
 	"fmt"
+	log "github.com/InPoint-Cloud/esm/internal/log"
 	"github.com/cheggaaa/pb"
-	log "github.com/cihub/seelog"
 	goflags "github.com/jessevdk/go-flags"
 	"github.com/mattn/go-isatty"
 	"io"
@@ -12,7 +12,6 @@ import (
 	_ "net/http/pprof"
 	"os"
 	"runtime"
-	_ "runtime/pprof"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -25,22 +24,6 @@ func main() {
 // run does the migration with the given command line arguments and returns the exit code
 func run(args []string) int {
 	runtime.GOMAXPROCS(runtime.NumCPU())
-
-	go func() {
-		//log.Infof("pprof listen at: http://%s/debug/pprof/", app.httpprof)
-		mux := http.NewServeMux()
-
-		// register pprof handler
-		mux.HandleFunc("/debug/pprof/", func(w http.ResponseWriter, r *http.Request) {
-			http.DefaultServeMux.ServeHTTP(w, r)
-		})
-
-		// register metrics handler
-		//mux.HandleFunc("/debug/vars", app.metricsHandler)
-
-		endpoint := http.ListenAndServe("127.0.0.1:6060", mux)
-		log.Debug("stop pprof server: %v", endpoint)
-	}()
 
 	var err error
 	c := &Config{}
@@ -62,7 +45,22 @@ func run(args []string) int {
 		return 0
 	}
 
-	setInitLogging(c.LogLevel)
+	closeLog, err := setupLogging(c.LogLevel, c.LogFile)
+	if err != nil {
+		log.Error(err)
+		return 1
+	}
+	defer closeLog()
+
+	insecureTLS = c.Insecure
+
+	if c.Pprof != "" {
+		go func() {
+			// net/http/pprof registers its handlers on the default mux
+			log.Infof("pprof listening on http://%s/debug/pprof/", c.Pprof)
+			log.Error("pprof server stopped: ", http.ListenAndServe(c.Pprof, nil))
+		}()
+	}
 
 	if len(c.SourceEs) == 0 && len(c.DumpInputFile) == 0 {
 		log.Error("no input, type --help for more details")

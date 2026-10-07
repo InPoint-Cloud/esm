@@ -167,6 +167,15 @@ use an api key instead of basic auth, the key is the base64 `encoded` value retu
 ./esm -s http://localhost:9200 -d https://localhost:9201 --dest_api_key "<encoded_api_key>" -x products --copy_settings --copy_mappings
 ```
 
+TLS certificates are verified. If a cluster uses a self-signed certificate (the default of a new 8.x/9.x install),
+add its CA to the system trust store, or skip the verification with `--insecure`
+
+```
+./esm -s https://localhost:9200 -m elastic:passwd -d https://localhost:9201 -n elastic:passwd -x products --insecure
+```
+
+the log goes to stderr, use `--log_file` to also write it to a file, and `--pprof` to start a profiling server on 127.0.0.1:6060
+
 ## Download
 https://github.com/InPoint-Cloud/esm/releases
 
@@ -243,6 +252,12 @@ Application Options:
   -v, --log=                       setting log
                                    level,options:trace,debug,info,warn,error
                                    (default: INFO)
+      --log_file=                  also write the log to this file
+      --insecure                   skip verifying the TLS certificates of
+                                   source and target, ie: for self-signed
+                                   certificates
+      --pprof=                     start a pprof server, on 127.0.0.1:6060 or
+                                   the given address
   -o, --output_file=               output documents of source index into local
                                    file
       --truncate_output            truncate before dump to output file

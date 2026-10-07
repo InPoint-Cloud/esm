@@ -21,7 +21,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	log "github.com/cihub/seelog"
+	log "github.com/InPoint-Cloud/esm/internal/log"
 	"io"
 	"regexp"
 	"strings"

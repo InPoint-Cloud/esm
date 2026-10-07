@@ -21,7 +21,7 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
-	log "github.com/cihub/seelog"
+	log "github.com/InPoint-Cloud/esm/internal/log"
 	"io"
 	"net/http"
 	"net/url"
@@ -82,18 +82,27 @@ func newDeleteRequest(client *http.Client, method, urlStr string) (*http.Request
 	return req, nil
 }
 
+// insecureTLS disables the verification of TLS certificates, set by --insecure
+var insecureTLS bool
+
+type clientKey struct {
+	proxy    string
+	insecure bool
+}
+
 // one client per proxy, source and target may use different proxies and are requested concurrently
 var clients sync.Map
 
 func getClient(proxy string) (*http.Client, error) {
-	if c, ok := clients.Load(proxy); ok {
+	key := clientKey{proxy: proxy, insecure: insecureTLS}
+	if c, ok := clients.Load(key); ok {
 		return c.(*http.Client), nil
 	}
 	transport := &http.Transport{
 		DisableKeepAlives:  true,
 		DisableCompression: false,
 		TLSClientConfig: &tls.Config{
-			InsecureSkipVerify: true,
+			InsecureSkipVerify: key.insecure,
 		},
 	}
 	if len(proxy) > 0 {
@@ -103,7 +112,7 @@ func getClient(proxy string) (*http.Client, error) {
 		}
 		transport.Proxy = http.ProxyURL(proxyUrl)
 	}
-	c, _ := clients.LoadOrStore(proxy, &http.Client{Transport: transport})
+	c, _ := clients.LoadOrStore(key, &http.Client{Transport: transport})
 	return c.(*http.Client), nil
 }
 

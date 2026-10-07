@@ -18,8 +18,8 @@ package main
 
 import (
 	"encoding/json"
+	log "github.com/InPoint-Cloud/esm/internal/log"
 	"github.com/cheggaaa/pb"
-	log "github.com/cihub/seelog"
 )
 
 type ScrollAPI interface {
@@ -64,7 +64,7 @@ func (s *Scroll) ProcessScrollResult(c *Migrator, bar *pb.ProgressBar) {
 	// show any failures
 	for _, failure := range s.Shards.Failures {
 		reason, _ := json.Marshal(failure.Reason)
-		log.Errorf(string(reason))
+		log.Error(string(reason))
 	}
 
 	// write all the docs into a channel
@@ -105,7 +105,7 @@ func (s *ScrollV7) ProcessScrollResult(c *Migrator, bar *pb.ProgressBar) {
 	// show any failures
 	for _, failure := range s.Shards.Failures {
 		reason, _ := json.Marshal(failure.Reason)
-		log.Errorf(string(reason))
+		log.Error(string(reason))
 	}
 
 	// write all the docs into a channel

@@ -150,6 +150,9 @@ type Config struct {
 	OverrideTypeName  string `short:"u" long:"type_override" description:"override type name" default:""`
 	WaitForGreen      bool   `long:"green"             description:"wait for both hosts cluster status to be green before dump. otherwise yellow is okay"`
 	LogLevel          string `short:"v" long:"log"            description:"setting log level,options:trace,debug,info,warn,error"  default:"INFO"`
+	LogFile           string `long:"log_file" description:"also write the log to this file"`
+	Insecure          bool   `long:"insecure" description:"skip verifying the TLS certificates of source and target, ie: for self-signed certificates"`
+	Pprof             string `long:"pprof" description:"start a pprof server, on 127.0.0.1:6060 or the given address" optional:"yes" optional-value:"127.0.0.1:6060"`
 	DumpOutFile       string `short:"o" long:"output_file"            description:"output documents of source index into local file" `
 	TruncateOutFile   bool   `long:"truncate_output" description:"truncate before dump to output file" `
 	DumpInputFile     string `short:"i" long:"input_file"            description:"indexing from local dump file" `

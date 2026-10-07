@@ -4,7 +4,6 @@ go 1.26.0
 
 require (
 	github.com/cheggaaa/pb v1.0.30
-	github.com/cihub/seelog v0.0.0-20170130134532-f561c5e57575
 	github.com/jessevdk/go-flags v1.6.1
 	github.com/mattn/go-isatty v0.0.24
 )

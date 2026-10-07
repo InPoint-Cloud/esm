@@ -5,7 +5,7 @@ package main
 
 import (
 	"fmt"
-	log "github.com/cihub/seelog"
+	log "github.com/InPoint-Cloud/esm/internal/log"
 	"os"
 	"strings"
 	"text/tabwriter"
