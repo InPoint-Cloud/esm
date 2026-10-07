@@ -68,10 +68,11 @@ func (s *ESAPIV0) ClusterVersion() *ClusterVersion {
 	return s.Version
 }
 
-func (s *ESAPIV0) Bulk(data *bytes.Buffer) error {
+func (s *ESAPIV0) Bulk(data *bytes.Buffer) (*BulkResponse, error) {
+	response := &BulkResponse{}
 	if data == nil || data.Len() == 0 {
 		log.Trace("data is empty, skip")
-		return nil
+		return response, nil
 	}
 	if data.Bytes()[data.Len()-1] != '\n' {
 		data.WriteRune('\n')
@@ -79,22 +80,37 @@ func (s *ESAPIV0) Bulk(data *bytes.Buffer) error {
 	url := fmt.Sprintf("%s/_bulk", s.Host)
 
 	body, err := Request(s.Compress, "POST", url, s.Auth, data, s.HttpProxy)
-
-	if err != nil {
-		data.Reset()
-		log.Error(err)
-		return err
-	}
-	response := BulkResponse{}
-	err = DecodeJson(body, &response)
-	if err == nil {
-		if response.Errors {
-			log.Warnf("bulk error:%s", body)
-		}
-	}
-
 	data.Reset()
-	return err
+	if err != nil {
+		return nil, err
+	}
+
+	if err = DecodeJson(body, response); err != nil {
+		return nil, err
+	}
+	return response, nil
+}
+
+func (s *ESAPIV0) Count(indexName string, query string) (int, error) {
+	url := fmt.Sprintf("%s/%s/_count", s.Host, indexName)
+	var reqBody *bytes.Buffer
+	if len(query) > 0 {
+		q, _ := json.Marshal(map[string]interface{}{
+			"query": map[string]interface{}{"query_string": map[string]interface{}{"query": query}},
+		})
+		reqBody = bytes.NewBuffer(q)
+	}
+	body, err := Request(false, "POST", url, s.Auth, reqBody, s.HttpProxy)
+	if err != nil {
+		return 0, err
+	}
+	result := struct {
+		Count int `json:"count"`
+	}{}
+	if err = DecodeJson(body, &result); err != nil {
+		return 0, err
+	}
+	return result.Count, nil
 }
 
 func (s *ESAPIV0) GetIndexSettings(indexNames string) (*Indexes, error) {
@@ -122,7 +138,7 @@ func (s *ESAPIV0) GetIndexSettings(indexNames string) (*Indexes, error) {
 
 	err := json.Unmarshal([]byte(body), allSettings)
 	if err != nil {
-		panic(err)
+		log.Error("can not parse index settings: ", SubString(body, 0, 500))
 		return nil, err
 	}
 
@@ -243,7 +259,8 @@ func (s *ESAPIV0) UpdateIndexSettings(name string, settings map[string]interface
 			bodyStr, err := Request(s.Compress, "PUT", url, s.Auth, &body, s.HttpProxy)
 			if err != nil {
 				log.Error(bodyStr, err)
-				panic(err)
+				// reopen the index before giving up
+				Request(false, "POST", fmt.Sprintf("%s/%s/_open", s.Host, name), s.Auth, nil, s.HttpProxy)
 				return err
 			}
 			delete(settings["settings"].(map[string]interface{})["index"].(map[string]interface{}), "analysis")
@@ -280,7 +297,7 @@ func (s *ESAPIV0) UpdateIndexMapping(indexName string, settings map[string]inter
 			log.Error(url)
 			log.Error(body.String())
 			log.Error(err, res)
-			panic(err)
+			return err
 		}
 	}
 	return nil

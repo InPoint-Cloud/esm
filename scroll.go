@@ -75,10 +75,10 @@ func (s *Scroll) ProcessScrollResult(c *Migrator, bar *pb.ProgressBar) {
 
 func (s *Scroll) Next(c *Migrator, bar *pb.ProgressBar) (done bool) {
 
-	scroll, err := c.SourceESAPI.NextScroll(c.Config.ScrollTime, s.ScrollId)
+	scroll, err := c.nextScroll(c.SourceESAPI, c.Config.ScrollTime, s.ScrollId)
 	if err != nil {
-		log.Error(err)
-		return false
+		// retries are exhausted, stop scrolling instead of looping forever
+		return true
 	}
 
 	docs := scroll.GetDocs()
@@ -116,10 +116,10 @@ func (s *ScrollV7) ProcessScrollResult(c *Migrator, bar *pb.ProgressBar) {
 
 func (s *ScrollV7) Next(c *Migrator, bar *pb.ProgressBar) (done bool) {
 
-	scroll, err := c.SourceESAPI.NextScroll(c.Config.ScrollTime, s.ScrollId)
+	scroll, err := c.nextScroll(c.SourceESAPI, c.Config.ScrollTime, s.ScrollId)
 	if err != nil {
-		log.Error(err)
-		return false
+		// retries are exhausted, stop scrolling instead of looping forever
+		return true
 	}
 
 	docs := scroll.GetDocs()

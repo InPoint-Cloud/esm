@@ -21,7 +21,8 @@ import "bytes"
 type ESAPI interface {
 	ClusterHealth() *ClusterHealth
 	ClusterVersion() *ClusterVersion
-	Bulk(data *bytes.Buffer) error
+	Bulk(data *bytes.Buffer) (*BulkResponse, error)
+	Count(indexName string, query string) (int, error)
 	GetIndexSettings(indexNames string) (*Indexes, error)
 	DeleteIndex(name string) error
 	CreateIndex(name string, settings map[string]interface{}) error

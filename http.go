@@ -21,7 +21,6 @@ import (
 	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"fmt"
 	log "github.com/cihub/seelog"
 	"github.com/parnurzeal/gorequest"
@@ -131,67 +130,16 @@ var client = &http.Client{
 		},
 	},
 }
-var fastHttpClient = &fasthttp.Client{
-	TLSConfig: &tls.Config{InsecureSkipVerify: true},
+
+// HTTPStatusError is returned by Request when the server answers with a non-200 status
+type HTTPStatusError struct {
+	Code   int
+	Length int64
+	Body   string
 }
 
-func DoRequest(compress bool, method string, loadUrl string, auth *Auth, body []byte, proxy string) (string, error) {
-
-	req := fasthttp.AcquireRequest()
-	resp := fasthttp.AcquireResponse()
-	//defer fasthttp.ReleaseRequest(req)   // <- do not forget to release
-	//defer fasthttp.ReleaseResponse(resp) // <- do not forget to release
-
-	req.SetRequestURI(loadUrl)
-	req.Header.SetMethod(method)
-
-	//req.Header.Set("Content-Type", "application/json")
-
-	if compress {
-		req.Header.Set("Accept-Encoding", "gzip")
-		req.Header.Set("content-encoding", "gzip")
-	}
-
-	if auth != nil {
-		req.URI().SetUsername(auth.User)
-		req.URI().SetPassword(auth.Pass)
-	}
-
-	if len(body) > 0 {
-		if compress {
-			_, err := fasthttp.WriteGzipLevel(req.BodyWriter(), body, fasthttp.CompressBestSpeed)
-			if err != nil {
-				panic(err)
-			}
-		} else {
-			req.SetBody(body)
-		}
-	}
-
-	err := fastHttpClient.Do(req, resp)
-
-	if err != nil {
-		panic(err)
-	}
-	if resp == nil {
-		panic("empty response")
-	}
-
-	log.Debug("received status code", resp.StatusCode, "from", string(resp.Header.Header()), "content",
-		SubString(string(resp.Body()), 0, 500), req)
-
-	if resp.StatusCode() == http.StatusOK || resp.StatusCode() == http.StatusCreated {
-
-	} else {
-		//log.Error("received status code", resp.StatusCode, "from", string(resp.Header.Header()), "content", string(resp.Body()), req)
-	}
-
-	//if compress{
-	//	data,err:= resp.BodyGunzip()
-	//	return string(data),err
-	//}
-
-	return string(resp.Body()), nil
+func (e *HTTPStatusError) Error() string {
+	return fmt.Sprintf("server error: code=%d, length=%d, info=", e.Code, e.Length) + e.Body
 }
 
 func Request(compress bool, method string, loadUrl string, auth *Auth, body *bytes.Buffer, proxy string) (string, error) {
@@ -205,7 +153,8 @@ func Request(compress bool, method string, loadUrl string, auth *Auth, body *byt
 	}
 
 	if err != nil {
-		panic(err)
+		log.Error(err)
+		return "", err
 	}
 
 	if auth != nil {
@@ -218,7 +167,11 @@ func Request(compress bool, method string, loadUrl string, auth *Auth, body *byt
 
 	oldTransport := client.Transport.(*http.Transport)
 	if len(proxy) > 0 {
-		proxyUrl := VerifyWithResult(url.Parse(proxy))
+		proxyUrl, err := url.Parse(proxy)
+		if err != nil {
+			log.Error(err)
+			return "", err
+		}
 		proxyFunc := http.ProxyURL(proxyUrl)
 		oldTransport.Proxy = proxyFunc
 	} else {
@@ -243,9 +196,8 @@ func Request(compress bool, method string, loadUrl string, auth *Auth, body *byt
 	}
 
 	if resp.StatusCode != 200 {
-		b := VerifyWithResult(io.ReadAll(resp.Body))
-		return "", errors.New(
-			fmt.Sprintf("server error: code=%d, length=%d, info=", resp.StatusCode, resp.ContentLength) + string(b))
+		b, _ := io.ReadAll(resp.Body)
+		return "", &HTTPStatusError{Code: resp.StatusCode, Length: resp.ContentLength, Body: string(b)}
 	}
 
 	respBody, err := io.ReadAll(resp.Body)

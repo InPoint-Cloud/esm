@@ -237,6 +237,9 @@ Application Options:
   -r, --regenerate_id              regenerate id for documents, this will override the exist document id in data source
       --compress                   use gzip to compress traffic
   -p, --sleep=                     sleep N seconds after finished a bulk request (-1)
+      --max_retries=               max retries of a failed bulk or scroll request (429/502/503/504 or network error), with exponential backoff (5)
+      --failed_output=             append documents that failed to index to this file, it can be re-imported with -i
+      --skip_count_check           skip comparing the document counts of source and target indexes after migration
 
 Help Options:
   -h, --help                       Show this help message
@@ -252,6 +255,27 @@ Help Options:
 http.max_header_size: 16k
 http.max_initial_line_length: 8k
 ```
+
+- Failed documents, retries and the final check
+
+  * every bulk response is checked, documents rejected by the target (ie: a mapping conflict) are counted as failed,
+    the first 10 errors are logged and the progress bar only counts indexed documents.
+  * bulk and scroll requests are retried up to `--max_retries` times (1s, 2s, 4s, ... up to 30s) on 429/502/503/504 and network errors,
+    documents rejected with 429 (`es_rejected_execution_exception`) are retried alone.
+  * at the end ESM prints `documents sent / indexed / failed`, refreshes the target indexes and compares `_count`
+    of every source index (with `-q` applied) and its target index (respecting `-y`); disable it with `--skip_count_check`.
+    The check is skipped when reading from or writing to a file.
+  * ESM exits with status 1 if any document failed, reading from the source failed, copying settings/mappings failed,
+    or the counts differ, so it can be used in scripts.
+  * with `--failed_output`, every document that still failed after the retries is appended to a file in the dump format
+    (`_index` is the target index name), fix the cause (ie: the mapping) and re-import them:
+
+```
+./esm -s http://localhost:9200 -d https://localhost:9201 -n elastic:passwd -x products --failed_output=failed.json
+./esm -i failed.json -d https://localhost:9201 -n elastic:passwd
+```
+  * with `--copy_settings`, new target indexes keep the number of shards of the source index (unless `--shards` is set),
+    `number_of_replicas` and `refresh_interval` are set to `0` / `-1` during the copy and restored from the source afterwards.
 
 - Migrating to 8.x / 9.x
 

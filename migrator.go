@@ -50,11 +50,19 @@ func (op BulkOperation) String() string {
 
 func (m *Migrator) recoveryIndexSettings(sourceIndexRefreshSettings map[string]interface{}) {
 	//update replica and refresh_interval
-	for name, interval := range sourceIndexRefreshSettings {
+	for name, settings := range sourceIndexRefreshSettings {
 		tempIndexSettings := getEmptyIndexSettings()
-		tempIndexSettings["settings"].(map[string]interface{})["index"].(map[string]interface{})["refresh_interval"] = interval
-		//tempIndexSettings["settings"].(map[string]interface{})["index"].(map[string]interface{})["number_of_replicas"] = 1
-		m.TargetESAPI.UpdateIndexSettings(name, tempIndexSettings)
+		index := tempIndexSettings["settings"].(map[string]interface{})["index"].(map[string]interface{})
+		for key, value := range settings.(map[string]interface{}) {
+			// a nil refresh_interval resets it to the default
+			if value != nil || key == "refresh_interval" {
+				index[key] = value
+			}
+		}
+		if err := m.TargetESAPI.UpdateIndexSettings(name, tempIndexSettings); err != nil {
+			log.Errorf("can not restore settings %v of index %s: %v", index, name, err)
+			m.Stats.MarkSetupFailed()
+		}
 		if m.Config.Refresh {
 			m.TargetESAPI.Refresh(name)
 		}
@@ -203,8 +211,9 @@ func (m *Migrator) NewBulkWorker(docCount *int, pb *pb.ProgressBar, wg *sync.Wai
 
 	log.Debug("start es bulk worker")
 
-	bulkItemSize := 0
-	mainBuf := bytes.Buffer{}
+	// bulk items of the current request, each one is the action line plus the source line
+	var items [][]byte
+	itemsSize := 0
 	docBuf := bytes.Buffer{}
 	docEnc := json.NewEncoder(&docBuf)
 
@@ -217,12 +226,13 @@ func (m *Migrator) NewBulkWorker(docCount *int, pb *pb.ProgressBar, wg *sync.Wai
 	defer taskTimeout.Stop()
 
 	haveTypeField := !m.targetIsTypeless()
-	/*
-		checkKeys := []string{"_index", "_type", "_source", "_id"}
-		if !haveTypeField {
-			checkKeys = []string{"_index", "_source", "_id"}
-		}
-	*/
+
+	flush := func() {
+		log.Trace("clean buffer, and execute bulk insert")
+		pb.Add(m.flushBulk(m.TargetESAPI, items))
+		items = nil
+		itemsSize = 0
+	}
 
 READ_DOCS:
 	for {
@@ -230,49 +240,6 @@ READ_DOCS:
 		taskTimeout.Reset(taskTimeOutDuration)
 		select {
 		case src, open := <-m.DocChan:
-			var err error
-			//log.Trace("read doc from channel,", src)
-			var tempDestIndexName string
-			var tempTargetTypeName string
-			tempDestIndexName = src.Index
-			if haveTypeField {
-				tempTargetTypeName = src.Type
-			}
-			if m.Config.TargetIndexName != "" {
-				tempDestIndexName = m.Config.TargetIndexName
-			}
-
-			if m.Config.OverrideTypeName != "" {
-				tempTargetTypeName = m.Config.OverrideTypeName
-			}
-			doc := Document{
-				Index: tempDestIndexName,
-				//Type:   tempTargetTypeName,
-				//Source:  src.Source,
-				Id:      src.Id,
-				Routing: src.Routing,
-			}
-			if haveTypeField {
-				doc.Type = tempTargetTypeName
-			}
-			if m.Config.RegenerateID {
-				doc.Id = ""
-			}
-			// 暂不再支持
-			/*
-							if m.Config.RenameFields != "" {
-								kvs := strings.Split(m.Config.RenameFields, ",")
-								for _, i := range kvs {
-									fvs := strings.Split(i, ":")
-									oldField := strings.TrimSpace(fvs[0])
-									newField := strings.TrimSpace(fvs[1])
-									if oldField == "_type" {
-										doc.Type = docI.Type
-									} else {
-				                        //todo
-									}
-								}
-							}*/
 			// if channel is closed flush and gtfo
 			if !open {
 				goto WORKER_DONE
@@ -282,6 +249,24 @@ READ_DOCS:
 			if !haveTypeField && strings.HasPrefix(src.Index, ".") && !m.Config.CopyAllIndexes && m.Config.TargetIndexName == "" {
 				log.Debugf("skip document %s of system index %s", src.Id, src.Index)
 				continue
+			}
+
+			doc := Document{
+				Index:   src.Index,
+				Id:      src.Id,
+				Routing: src.Routing,
+			}
+			if m.Config.TargetIndexName != "" {
+				doc.Index = m.Config.TargetIndexName
+			}
+			if haveTypeField {
+				doc.Type = src.Type
+				if m.Config.OverrideTypeName != "" {
+					doc.Type = m.Config.OverrideTypeName
+				}
+			}
+			if m.Config.RegenerateID {
+				doc.Id = ""
 			}
 
 			// sanity check
@@ -294,75 +279,56 @@ READ_DOCS:
 			post := map[string]Document{
 				"index": doc,
 			}
-			if err = docEnc.Encode(post); err != nil {
+			if err := docEnc.Encode(post); err != nil {
 				log.Error(err)
+				docBuf.Reset()
+				continue
 			}
-			// append the doc to the main buffer
-			mainBuf.Write(docBuf.Bytes())
-			mainBuf.Write(src.Source)
-			mainBuf.WriteByte('\n')
-			// reset for next document
-			bulkItemSize++
-			(*docCount)++
+			docBuf.Write(src.Source)
+			docBuf.WriteByte('\n')
+			item := make([]byte, docBuf.Len())
+			copy(item, docBuf.Bytes())
 			docBuf.Reset()
+			items = append(items, item)
+			itemsSize += len(item)
+			(*docCount)++
 
-			// if we approach the 100mb es limit, flush to es and reset mainBuf
-			if mainBuf.Len()+docBuf.Len() > (m.Config.BulkSizeInMB * 1024 * 1024) {
-				goto CLEAN_BUFFER
+			// if we approach the es bulk size limit, flush to es
+			if itemsSize > (m.Config.BulkSizeInMB * 1024 * 1024) {
+				flush()
+				if m.Config.SleepSecondsAfterEachBulk > 0 {
+					time.Sleep(time.Duration(m.Config.SleepSecondsAfterEachBulk) * time.Second)
+				}
 			}
 
 		case <-idleTimeout.C:
 			log.Debug("5s no message input")
-			goto CLEAN_BUFFER
+			flush()
 		case <-taskTimeout.C:
 			log.Warn("5m no message input, close worker")
 			goto WORKER_DONE
 		}
-
 		goto READ_DOCS
-
-	CLEAN_BUFFER:
-		m.TargetESAPI.Bulk(&mainBuf)
-		log.Trace("clean buffer, and execute bulk insert")
-		pb.Add(bulkItemSize)
-		bulkItemSize = 0
-		if m.Config.SleepSecondsAfterEachBulk > 0 {
-			time.Sleep(time.Duration(m.Config.SleepSecondsAfterEachBulk) * time.Second)
-		}
 	}
 WORKER_DONE:
-	if docBuf.Len() > 0 {
-		mainBuf.Write(docBuf.Bytes())
-		bulkItemSize++
-	}
-	m.TargetESAPI.Bulk(&mainBuf)
+	flush()
 	log.Trace("bulk insert")
-	pb.Add(bulkItemSize)
-	bulkItemSize = 0
 	wg.Done()
 }
 
 func (m *Migrator) bulkRecords(bulkOp BulkOperation, dstEsApi ESAPI, targetIndex string, targetType string, diffDocMaps map[string]json.RawMessage) error {
-	//var err error
-	docCount := 0
-	bulkItemSize := 0
-	mainBuf := bytes.Buffer{}
+	var items [][]byte
 	docBuf := bytes.Buffer{}
 	docEnc := json.NewEncoder(&docBuf)
-	//var tempDestIndexName string
-	//var tempTargetTypeName string
 
 	haveTypeField := majorVersion(dstEsApi.ClusterVersion()) < 8
 
 	for docId, docData := range diffDocMaps {
 		log.Debugf("now will bulk %s docId=%s, docData=%+v", bulkOp, docId, docData)
-		//tempDestIndexName = docI["_index"].(string)
-		//tempTargetTypeName = docI["_type"].(string)
 		var strOperation string
 		doc := Document{
 			Index: targetIndex,
-			//Type:  targetType,
-			Id: docId, // docI["_id"].(string),
+			Id:    docId,
 		}
 		if haveTypeField {
 			doc.Type = targetType
@@ -376,28 +342,25 @@ func (m *Migrator) bulkRecords(bulkOp BulkOperation, dstEsApi ESAPI, targetIndex
 		}
 
 		// encode the doc and and the _source field for a bulk request
-
 		post := map[string]Document{
 			strOperation: doc,
 		}
-		_ = Verify(docEnc.Encode(post))
+		if err := docEnc.Encode(post); err != nil {
+			return err
+		}
 		if bulkOp == opIndex {
 			_, _ = docBuf.Write(docData)
 			if docData[len(docData)-1] != byte('\n') {
 				_, _ = docBuf.Write([]byte{'\n'})
 			}
 		}
-		// append the doc to the main buffer
-		mainBuf.Write(docBuf.Bytes())
-		// reset for next document
-		bulkItemSize++
-		docCount++
+		item := make([]byte, docBuf.Len())
+		copy(item, docBuf.Bytes())
 		docBuf.Reset()
+		items = append(items, item)
 	}
 
-	if mainBuf.Len() > 0 {
-		_ = Verify(dstEsApi.Bulk(&mainBuf))
-	}
+	m.flushBulk(dstEsApi, items)
 	return nil
 }
 
@@ -456,7 +419,10 @@ func (m *Migrator) SyncBetweenIndex(srcEsApi ESAPI, dstEsApi ESAPI, cfg *Config)
 		} else if needScrollSrc {
 			start := time.Now()
 			log.Debugf("source index: %s next scroll, source id: %s", cfg.SourceIndexNames, srcScroll.GetScrollId())
-			srcScroll = VerifyWithResult(srcEsApi.NextScroll(cfg.ScrollTime, srcScroll.GetScrollId())).(ScrollAPI)
+			srcScroll, err = m.nextScroll(srcEsApi, cfg.ScrollTime, srcScroll.GetScrollId())
+			if err != nil {
+				return
+			}
 			if cfg.Dry {
 				elapsed := time.Since(start)
 				fmt.Printf("src scroll : %s\n", elapsed)
@@ -483,7 +449,10 @@ func (m *Migrator) SyncBetweenIndex(srcEsApi ESAPI, dstEsApi ESAPI, cfg *Config)
 		} else if needScrollDest {
 			start := time.Now()
 			log.Debugf("source index: %s next scroll, source id: %s", cfg.TargetIndexName, dstScroll.GetScrollId())
-			dstScroll = VerifyWithResult(dstEsApi.NextScroll(cfg.ScrollTime, dstScroll.GetScrollId())).(ScrollAPI)
+			dstScroll, err = m.nextScroll(dstEsApi, cfg.ScrollTime, dstScroll.GetScrollId())
+			if err != nil {
+				return
+			}
 			if cfg.Dry {
 				elapsed := time.Since(start)
 				fmt.Printf("dest scroll : %s\n", elapsed)
@@ -570,7 +539,7 @@ func (m *Migrator) SyncBetweenIndex(srcEsApi ESAPI, dstEsApi ESAPI, cfg *Config)
 			updateCount += len(diffDocMaps)
 			log.Debugf("now will bulk update %d records", len(diffDocMaps))
 			if !cfg.Dry {
-				_ = Verify(m.bulkRecords(opIndex, dstEsApi, cfg.TargetIndexName, srcType, diffDocMaps))
+				_ = m.bulkRecords(opIndex, dstEsApi, cfg.TargetIndexName, srcType, diffDocMaps)
 			} else {
 				showDocs("diff", diffDocMaps)
 			}
@@ -580,7 +549,7 @@ func (m *Migrator) SyncBetweenIndex(srcEsApi ESAPI, dstEsApi ESAPI, cfg *Config)
 			addCount += len(newDocMaps)
 			log.Debugf("now will bulk index %d records", len(diffDocMaps))
 			if !cfg.Dry {
-				_ = Verify(m.bulkRecords(opIndex, dstEsApi, cfg.TargetIndexName, srcType, newDocMaps))
+				_ = m.bulkRecords(opIndex, dstEsApi, cfg.TargetIndexName, srcType, newDocMaps)
 			} else {
 				showDocs("new", newDocMaps)
 			}
@@ -591,7 +560,7 @@ func (m *Migrator) SyncBetweenIndex(srcEsApi ESAPI, dstEsApi ESAPI, cfg *Config)
 			// dst 已经中已经没有更多的记录, 可以直接将所有的 src 都同步到 dst 中了,避免其中保存太多
 			addCount += len(srcDocMaps)
 			if !cfg.Dry {
-				_ = Verify(m.bulkRecords(opIndex, dstEsApi, cfg.TargetIndexName, dstType, srcDocMaps))
+				_ = m.bulkRecords(opIndex, dstEsApi, cfg.TargetIndexName, dstType, srcDocMaps)
 			} else {
 				showDocs("insert", srcDocMaps)
 			}
@@ -602,7 +571,7 @@ func (m *Migrator) SyncBetweenIndex(srcEsApi ESAPI, dstEsApi ESAPI, cfg *Config)
 			//dstDocMaps 中还有记录,而且当前已经检测过所有的 src 记录, 说明这些 dst 记录是多余的,需要删除
 			deleteCount += len(dstDocMaps)
 			if !cfg.Dry && cfg.EnableDelete {
-				_ = Verify(m.bulkRecords(opDelete, dstEsApi, cfg.TargetIndexName, dstType, dstDocMaps))
+				_ = m.bulkRecords(opDelete, dstEsApi, cfg.TargetIndexName, dstType, dstDocMaps)
 			}
 			if cfg.Dry {
 				showDocs("delete", dstDocMaps)
@@ -645,7 +614,7 @@ func (m *Migrator) SyncBetweenIndex(srcEsApi ESAPI, dstEsApi ESAPI, cfg *Config)
 			if len(srcDocMaps) > 0 {
 				addCount += len(srcDocMaps)
 				if !cfg.Dry {
-					_ = Verify(m.bulkRecords(opIndex, dstEsApi, cfg.TargetIndexName, srcType, srcDocMaps))
+					_ = m.bulkRecords(opIndex, dstEsApi, cfg.TargetIndexName, srcType, srcDocMaps)
 				} else {
 					showDocs("insert", srcDocMaps)
 				}
@@ -654,7 +623,7 @@ func (m *Migrator) SyncBetweenIndex(srcEsApi ESAPI, dstEsApi ESAPI, cfg *Config)
 				//最后在 dst 中还有遗留的,表示 dst 中多的.需要删除
 				deleteCount += len(dstDocMaps)
 				if !cfg.Dry && cfg.EnableDelete {
-					_ = Verify(m.bulkRecords(opDelete, dstEsApi, cfg.TargetIndexName, srcType, dstDocMaps))
+					_ = m.bulkRecords(opDelete, dstEsApi, cfg.TargetIndexName, srcType, dstDocMaps)
 				}
 				if cfg.Dry {
 					showDocs("delete", dstDocMaps)

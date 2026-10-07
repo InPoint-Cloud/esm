@@ -194,7 +194,7 @@ func (s *ESAPIV6) UpdateIndexMapping(indexName string, settings map[string]inter
 			log.Error(url)
 			log.Error(settings)
 			log.Error(err, res)
-			panic(err)
+			return err
 		}
 	}
 	return nil

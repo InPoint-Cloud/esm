@@ -31,6 +31,23 @@ type Document struct {
 	Routing string          `json:"routing,omitempty"` //after 6, only `routing` was supported
 }
 
+// UnmarshalJSON also reads the routing of search hits, which is returned as "_routing",
+// while bulk requests (and dump files) use "routing"
+func (d *Document) UnmarshalJSON(data []byte) error {
+	type plainDocument Document
+	aux := struct {
+		*plainDocument
+		HitRouting string `json:"_routing,omitempty"`
+	}{plainDocument: (*plainDocument)(d)}
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+	if len(d.Routing) == 0 {
+		d.Routing = aux.HitRouting
+	}
+	return nil
+}
+
 type Scroll struct {
 	Took     int    `json:"took,omitempty"`
 	ScrollId string `json:"_scroll_id,omitempty"`
@@ -103,6 +120,7 @@ type Migrator struct {
 	SourceAuth  *Auth
 	TargetAuth  *Auth
 	Config      *Config
+	Stats       MigrationStats
 }
 
 type Config struct {
@@ -157,6 +175,9 @@ type Config struct {
 	EnableDelete                   bool   `long:"enable_delete"          description:"enable delete records in dest index if there are more records"`
 	IgnoreContentCompare           bool   `long:"ignore_content_compare" description:"ignore to compare the content of a record"`
 	IgnoreFieldsInCompare          string `long:"ignore_compare_fields" description:"fields to ignore when compare documents, comma separated, ie: col1,col2,col3,..." `
+	MaxRetries                     int    `long:"max_retries" description:"max retries of a failed bulk or scroll request (429/502/503/504 or network error), with exponential backoff" default:"5"`
+	FailedOutputFile               string `long:"failed_output" description:"append documents that failed to index to this file, it can be re-imported with -i"`
+	SkipCountCheck                 bool   `long:"skip_count_check" description:"skip comparing the document counts of source and target indexes after migration"`
 }
 
 type Auth struct {
