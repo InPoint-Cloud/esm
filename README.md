@@ -186,8 +186,22 @@ https://github.com/InPoint-Cloud/esm/releases
 ## Compile:
 if download version is not fill you environment,you may try to compile it yourself. `go` required.
 
-`make build`
-* go version >= 1.7
+`go build -o esm .`
+* go version >= 1.21
+
+## Releasing
+Releases are built by GoReleaser in GitHub Actions (`.github/workflows/Release.yml`).
+Push a semver tag and the workflow builds linux/darwin/windows binaries for amd64 and arm64,
+then publishes them with checksums and a changelog as a GitHub release:
+
+```
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+Tags with a suffix such as `v1.1.0-rc.1` are published as pre-releases. Running the workflow
+manually builds a snapshot and attaches the binaries to the workflow run instead of releasing.
+To try it locally: `goreleaser release --snapshot --clean`. `esm --version` shows the version of a build.
 
 ## Options
 

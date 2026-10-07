@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"fmt"
 	"github.com/cheggaaa/pb"
 	log "github.com/cihub/seelog"
 	goflags "github.com/jessevdk/go-flags"
@@ -53,6 +54,11 @@ func run() int {
 		}
 		log.Error(err)
 		return 1
+	}
+
+	if c.ShowVersion {
+		fmt.Printf("esm %s (commit %s, built %s)\n", version, commit, buildDate)
+		return 0
 	}
 
 	setInitLogging(c.LogLevel)
@@ -192,7 +198,8 @@ func run() int {
 				}
 
 				totalSize := 0
-				finishedSlice := 0
+				// tracks only the scroll slices, so the doc chan can be closed once all of them are done
+				sliceWg := sync.WaitGroup{}
 				for slice := 0; slice < c.ScrollSliceSize; slice++ {
 					scroll, err := migrator.SourceESAPI.NewScroll(c.SourceIndexNames, c.ScrollTime, c.DocBufferCount, c.Query,
 						c.SortField, slice, c.ScrollSliceSize, c.Fields)
@@ -210,8 +217,11 @@ func run() int {
 							//return
 						}
 
+						wg.Add(1)
+						sliceWg.Add(1)
 						go func() {
-							wg.Add(1)
+							defer wg.Done()
+							defer sliceWg.Done()
 							//process input
 							// start scroll
 							scroll.ProcessScrollResult(&migrator, fetchBar)
@@ -219,23 +229,19 @@ func run() int {
 							// loop scrolling until done
 							for scroll.Next(&migrator, fetchBar) == false {
 							}
-
-							if showBar {
-								fetchBar.Finish()
-							}
-
-							// finished, close doc chan and wait for goroutines to be done
-							wg.Done()
-							finishedSlice++
-
-							//clean up final results
-							if finishedSlice == c.ScrollSliceSize {
-								log.Debug("closing doc chan")
-								close(migrator.DocChan)
-							}
 						}()
 					}
 				}
+
+				// all slices finished, close doc chan so the bulk workers can drain and exit
+				go func() {
+					sliceWg.Wait()
+					if showBar {
+						fetchBar.Finish()
+					}
+					log.Debug("closing doc chan")
+					close(migrator.DocChan)
+				}()
 
 				if totalSize > 0 {
 					fetchBar.Total = int64(totalSize)

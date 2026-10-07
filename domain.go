@@ -178,6 +178,7 @@ type Config struct {
 	MaxRetries                     int    `long:"max_retries" description:"max retries of a failed bulk or scroll request (429/502/503/504 or network error), with exponential backoff" default:"5"`
 	FailedOutputFile               string `long:"failed_output" description:"append documents that failed to index to this file, it can be re-imported with -i"`
 	SkipCountCheck                 bool   `long:"skip_count_check" description:"skip comparing the document counts of source and target indexes after migration"`
+	ShowVersion                    bool   `long:"version" description:"print the esm version and exit"`
 }
 
 type Auth struct {

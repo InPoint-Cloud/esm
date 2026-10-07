@@ -35,3 +35,6 @@ _testmain.go
 /src
 
 
+
+# goreleaser output
+/dist/

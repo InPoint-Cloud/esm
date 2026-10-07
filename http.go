@@ -29,6 +29,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 )
 
 func BasicAuth(req *fasthttp.Request, user, pass string) {
@@ -121,14 +122,29 @@ func newDeleteRequest(client *http.Client, method, urlStr string) (*http.Request
 	return req, nil
 }
 
-var client = &http.Client{
-	Transport: &http.Transport{
+// one client per proxy, source and target may use different proxies and are requested concurrently
+var clients sync.Map
+
+func getClient(proxy string) (*http.Client, error) {
+	if c, ok := clients.Load(proxy); ok {
+		return c.(*http.Client), nil
+	}
+	transport := &http.Transport{
 		DisableKeepAlives:  true,
 		DisableCompression: false,
 		TLSClientConfig: &tls.Config{
 			InsecureSkipVerify: true,
 		},
-	},
+	}
+	if len(proxy) > 0 {
+		proxyUrl, err := url.Parse(proxy)
+		if err != nil {
+			return nil, err
+		}
+		transport.Proxy = http.ProxyURL(proxyUrl)
+	}
+	c, _ := clients.LoadOrStore(proxy, &http.Client{Transport: transport})
+	return c.(*http.Client), nil
 }
 
 // HTTPStatusError is returned by Request when the server answers with a non-200 status
@@ -144,7 +160,12 @@ func (e *HTTPStatusError) Error() string {
 
 func Request(compress bool, method string, loadUrl string, auth *Auth, body *bytes.Buffer, proxy string) (string, error) {
 
-	var err error
+	client, err := getClient(proxy)
+	if err != nil {
+		log.Error(err)
+		return "", err
+	}
+
 	var reqest *http.Request
 	if body != nil {
 		reqest, err = http.NewRequest(method, loadUrl, body)
@@ -165,18 +186,6 @@ func Request(compress bool, method string, loadUrl string, auth *Auth, body *byt
 		}
 	}
 
-	oldTransport := client.Transport.(*http.Transport)
-	if len(proxy) > 0 {
-		proxyUrl, err := url.Parse(proxy)
-		if err != nil {
-			log.Error(err)
-			return "", err
-		}
-		proxyFunc := http.ProxyURL(proxyUrl)
-		oldTransport.Proxy = proxyFunc
-	} else {
-		oldTransport.Proxy = nil
-	}
 	reqest.Header.Set("Content-Type", "application/json")
 
 	//enable gzip

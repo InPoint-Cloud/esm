@@ -1,0 +1,54 @@
+# GoReleaser config for esm. Runs from .github/workflows/Release.yml on tag push (v*).
+# Local dry run: goreleaser release --snapshot --clean
+version: 2
+
+project_name: esm
+
+before:
+  hooks:
+    - go mod download
+
+builds:
+  - id: esm
+    main: .
+    binary: esm
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X main.version={{ .Version }}
+      - -X main.commit={{ .ShortCommit }}
+      - -X main.buildDate={{ .Date }}
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+
+archives:
+  - id: esm
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - README.md
+      - LICENSE.md
+
+checksum:
+  name_template: checksums.txt
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  use: github
+  sort: asc
+  filters:
+    exclude:
+      - "^Merge "
+      - "^(docs|chore|ci)(\\(.*\\))?:"
+
+release:
+  # Tags like v1.2.0-rc.1 are marked as pre-releases automatically.
+  prerelease: auto
