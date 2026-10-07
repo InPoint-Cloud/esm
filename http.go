@@ -49,17 +49,23 @@ func Get(url string, auth *Auth, proxy string) (*http.Response, string, []error)
 	}
 	request.Transport = tr
 
-	if auth != nil {
-		request.SetBasicAuth(auth.User, auth.Pass)
-	}
-
 	//request.Type("application/json")
 
 	if len(proxy) > 0 {
 		request.Proxy(proxy)
 	}
 
-	resp, body, errs := request.Get(url).End()
+	// gorequest's Get() resets headers, so auth has to be set after it
+	request.Get(url)
+	if auth != nil {
+		if len(auth.ApiKey) > 0 {
+			request.Set("Authorization", "ApiKey "+auth.ApiKey)
+		} else {
+			request.SetBasicAuth(auth.User, auth.Pass)
+		}
+	}
+
+	resp, body, errs := request.End()
 	return resp, body, errs
 
 }
@@ -203,7 +209,11 @@ func Request(compress bool, method string, loadUrl string, auth *Auth, body *byt
 	}
 
 	if auth != nil {
-		reqest.SetBasicAuth(auth.User, auth.Pass)
+		if len(auth.ApiKey) > 0 {
+			reqest.Header.Set("Authorization", "ApiKey "+auth.ApiKey)
+		} else {
+			reqest.SetBasicAuth(auth.User, auth.Pass)
+		}
 	}
 
 	oldTransport := client.Transport.(*http.Transport)

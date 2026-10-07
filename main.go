@@ -12,7 +12,6 @@ import (
 	"os"
 	"runtime"
 	_ "runtime/pprof"
-	"strings"
 	"sync"
 	"time"
 )
@@ -82,12 +81,12 @@ func main() {
 		if len(c.TargetIndexName) == 0 {
 			c.TargetIndexName = c.SourceIndexNames
 		}
-		migrator.SourceESAPI = migrator.ParseEsApi(true, c.SourceEs, c.SourceEsAuthStr, c.SourceProxy, c.Compress)
+		migrator.SourceESAPI = migrator.ParseEsApi(true, c.SourceEs, c.SourceEsAuthStr, c.SourceEsApiKey, c.SourceProxy, c.Compress)
 		if migrator.SourceESAPI == nil {
 			log.Error("can not parse source es api")
 			return
 		}
-		migrator.TargetESAPI = migrator.ParseEsApi(false, c.TargetEs, c.TargetEsAuthStr, c.TargetProxy, false)
+		migrator.TargetESAPI = migrator.ParseEsApi(false, c.TargetEs, c.TargetEsAuthStr, c.TargetEsApiKey, c.TargetProxy, false)
 		if migrator.TargetESAPI == nil {
 			log.Error("can not parse target es api")
 			return
@@ -97,12 +96,12 @@ func main() {
 	}
 
 	if c.DiffCounts {
-		migrator.SourceESAPI = migrator.ParseEsApi(true, c.SourceEs, c.SourceEsAuthStr, c.SourceProxy, c.Compress)
+		migrator.SourceESAPI = migrator.ParseEsApi(true, c.SourceEs, c.SourceEsAuthStr, c.SourceEsApiKey, c.SourceProxy, c.Compress)
 		if migrator.SourceESAPI == nil {
 			log.Error("can not parse source es api")
 			return
 		}
-		migrator.TargetESAPI = migrator.ParseEsApi(false, c.TargetEs, c.TargetEsAuthStr, c.TargetProxy, false)
+		migrator.TargetESAPI = migrator.ParseEsApi(false, c.TargetEs, c.TargetEsAuthStr, c.TargetEsApiKey, c.TargetProxy, false)
 		if migrator.TargetESAPI == nil {
 			log.Error("can not parse target es api")
 			return
@@ -141,11 +140,17 @@ func main() {
 			if len(c.SourceEs) > 0 {
 				//dealing with basic auth
 
-				migrator.SourceESAPI = migrator.ParseEsApi(true, c.SourceEs, c.SourceEsAuthStr,
+				migrator.SourceESAPI = migrator.ParseEsApi(true, c.SourceEs, c.SourceEsAuthStr, c.SourceEsApiKey,
 					migrator.Config.SourceProxy, c.Compress)
 				if migrator.SourceESAPI == nil {
 					log.Error("can not parse source es api")
 					return
+				}
+
+				// sorting on _id needs fielddata, which is disabled by default since 8.0
+				if c.SortField == "_id" && majorVersion(migrator.SourceESAPI.ClusterVersion()) >= 8 {
+					log.Info("source es is 8.x+, sorting by _doc instead of _id")
+					c.SortField = "_doc"
 				}
 
 				if c.ScrollSliceSize < 1 {
@@ -249,14 +254,8 @@ func main() {
 
 			//dealing with output
 			if len(c.TargetEs) > 0 {
-				if len(c.TargetEsAuthStr) > 0 && strings.Contains(c.TargetEsAuthStr, ":") {
-					authArray := strings.Split(c.TargetEsAuthStr, ":")
-					auth := Auth{User: authArray[0], Pass: authArray[1]}
-					migrator.TargetAuth = &auth
-				}
-
 				//get target es api
-				migrator.TargetESAPI = migrator.ParseEsApi(false, c.TargetEs, c.TargetEsAuthStr,
+				migrator.TargetESAPI = migrator.ParseEsApi(false, c.TargetEs, c.TargetEsAuthStr, c.TargetEsApiKey,
 					migrator.Config.TargetProxy, false)
 				if migrator.TargetESAPI == nil {
 					log.Error("can not parse target es api")
@@ -264,12 +263,17 @@ func main() {
 				}
 
 				log.Debug("start process with mappings")
-				if c.CopyIndexMappings &&
-					migrator.TargetESAPI.ClusterVersion().Version.Number[0] != migrator.SourceESAPI.ClusterVersion().Version.Number[0] {
-					log.Warn(migrator.SourceESAPI.ClusterVersion().Version, "=>",
-						migrator.TargetESAPI.ClusterVersion().Version,
-						",cross-big-version mapping migration, please confirm manually !!")
-					//return
+				// mappings from 7.x+ are typeless and can be copied across major versions,
+				// mappings of older versions may need to be checked manually
+				if c.CopyIndexMappings && migrator.SourceESAPI != nil {
+					srcMajor := majorVersion(migrator.SourceESAPI.ClusterVersion())
+					dstMajor := majorVersion(migrator.TargetESAPI.ClusterVersion())
+					if srcMajor != dstMajor && (srcMajor < 7 || dstMajor < 7) {
+						log.Warn(migrator.SourceESAPI.ClusterVersion().Version, "=>",
+							migrator.TargetESAPI.ClusterVersion().Version,
+							",cross-big-version mapping migration, please confirm manually !!")
+						//return
+					}
 				}
 				// wait for cluster state to be okay before moving
 				idleDuration := 3 * time.Second
@@ -338,6 +342,10 @@ func main() {
 								(*sourceIndexSettings)[c.TargetIndexName] = (*sourceIndexSettings)[c.SourceIndexNames]
 								delete(*sourceIndexSettings, c.SourceIndexNames)
 								log.Debug(sourceIndexSettings)
+								if c.CopyIndexMappings {
+									(*sourceIndexMappings)[c.TargetIndexName] = (*sourceIndexMappings)[c.SourceIndexNames]
+									delete(*sourceIndexMappings, c.SourceIndexNames)
+								}
 							}
 
 							// dealing with indices settings

@@ -114,6 +114,8 @@ type Config struct {
 	TargetEs            string `short:"d" long:"dest"    description:"destination elasticsearch instance, ie: http://localhost:9201"`
 	SourceEsAuthStr     string `short:"m" long:"source_auth"  description:"basic auth of source elasticsearch instance, ie: user:pass"`
 	TargetEsAuthStr     string `short:"n" long:"dest_auth"  description:"basic auth of target elasticsearch instance, ie: user:pass"`
+	SourceEsApiKey      string `long:"source_api_key"  description:"api key of source elasticsearch instance (base64 encoded id:api_key), used instead of source_auth"`
+	TargetEsApiKey      string `long:"dest_api_key"  description:"api key of target elasticsearch instance (base64 encoded id:api_key), used instead of dest_auth"`
 	DocBufferCount      int    `short:"c" long:"count"   description:"number of documents at a time: ie \"size\" in the scroll request" default:"10000"`
 	BufferCount         int    `long:"buffer_count"   description:"number of buffered documents in memory" default:"1000000"`
 	Workers             int    `short:"w" long:"workers" description:"concurrency number for bulk workers" default:"1"`
@@ -158,6 +160,7 @@ type Config struct {
 }
 
 type Auth struct {
-	User string
-	Pass string
+	User   string
+	Pass   string
+	ApiKey string
 }

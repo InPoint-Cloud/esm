@@ -11,7 +11,8 @@ Links:
 *  Cross version migration supported
 *  Overwrite index name
 *  Copy index settings and mapping
-*  Support http basic auth
+*  Support http basic auth and api key auth
+*  Support migrating from 7.x to 8.x / 9.x (typeless target, settings and mappings are cleaned up automatically)
 *  Support dump index to local file
 *  Support loading index from local file
 *  Support http proxy
@@ -166,6 +167,18 @@ user buffer_count to control memory used by ESM， and use gzip to compress netw
 ./esm -s https://localhost:8000 -d https://localhost:8000 -x logs1kw -y logs122 -m elastic:medcl123 -n elastic:medcl123 --regenerate_id -w 20 --sliced_scroll_size=60 -b 5 --buffer_count=1000000 --compress false 
 ```
 
+migrate from elasticsearch 7.x to 9.x (or 8.x), copy settings and mappings, the target uses https and basic auth
+
+```
+./esm -s http://localhost:9200 -d https://localhost:9201 -n elastic:passwd -x "products,logs" --copy_settings --copy_mappings --refresh
+```
+
+use an api key instead of basic auth, the key is the base64 `encoded` value returned by `POST /_security/api_key`
+
+```
+./esm -s http://localhost:9200 -d https://localhost:9201 --dest_api_key "<encoded_api_key>" -x products --copy_settings --copy_mappings
+```
+
 ## Download
 https://github.com/InPoint-Cloud/esm/releases
 
@@ -189,6 +202,8 @@ Application Options:
   -d, --dest=                      destination elasticsearch instance, ie: http://localhost:9201
   -m, --source_auth=               basic auth of source elasticsearch instance, ie: user:pass
   -n, --dest_auth=                 basic auth of target elasticsearch instance, ie: user:pass
+      --source_api_key=            api key of source elasticsearch instance (base64 encoded id:api_key), used instead of source_auth
+      --dest_api_key=              api key of target elasticsearch instance (base64 encoded id:api_key), used instead of dest_auth
   -c, --count=                     number of documents at a time: ie "size" in the scroll request (10000)
       --buffer_count=              number of buffered documents in memory (100000)
   -w, --workers=                   concurrency number for bulk workers (1)
@@ -238,6 +253,28 @@ http.max_header_size: 16k
 http.max_initial_line_length: 8k
 ```
 
+- Migrating to 8.x / 9.x
+
+  ESM detects the target version and handles the differences of 8.x and 9.x automatically:
+
+  * documents are written without `_type`, mapping types are removed in 8.x.
+  * documents of system indices (starting with `.`) are skipped, unless `-a` or `-y` is used.
+  * with `--copy_settings`, settings that 8.x/9.x reject are removed: `index.mapper.dynamic`, `max_adjacency_matrix_filters`,
+    `force_memory_term_dictionary`, `soft_deletes.enabled`, `translog.retention`, `frozen`, `search.throttled`,
+    `verified_before_close`, `resize`, `shrink`, `routing.allocation.initial_recovery`.
+    The deprecated `nGram` / `edgeNGram` analysis types are renamed to `ngram` / `edge_ngram`.
+  * with `--copy_mappings`, `_field_names.enabled` and the `boost` parameter (fields, multi-fields, dynamic templates) are removed,
+    `dynamic_templates` are kept.
+  * copying mappings across major versions is supported from 7.x and above, for older versions ESM only warns and the mappings should be checked manually.
+  * a secured cluster needs `-m`/`-n` or `--source_api_key`/`--dest_api_key`, otherwise ESM stops with an authentication error.
+  * when the source is 8.x+, the scroll is sorted by `_doc` instead of `_id`, because sorting on `_id` is disabled by default.
+  * `--sync` sorts both sides by `_id`, so on an 8.x/9.x target enable it first:
+
+```
+PUT _cluster/settings
+{"persistent": {"indices.id_field_data.enabled": true}}
+```
+
 Versions
 --------
 
@@ -269,4 +306,8 @@ From       | To
 7.x | 6.x
 7.x | 7.x
 7.x | 8.x
+7.x | 9.x
+8.x | 8.x
+8.x | 9.x
+9.x | 9.x
 

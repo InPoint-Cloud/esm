@@ -73,7 +73,9 @@ func (s *ESAPIV0) Bulk(data *bytes.Buffer) error {
 		log.Trace("data is empty, skip")
 		return nil
 	}
-	data.WriteRune('\n')
+	if data.Bytes()[data.Len()-1] != '\n' {
+		data.WriteRune('\n')
+	}
 	url := fmt.Sprintf("%s/_bulk", s.Host)
 
 	body, err := Request(s.Compress, "POST", url, s.Auth, data, s.HttpProxy)

@@ -25,7 +25,6 @@ import (
 	//"github.com/google/go-cmp/cmp"
 	"io"
 	"io/ioutil"
-	"reflect"
 	"strings"
 	"sync"
 	"time"
@@ -84,16 +83,26 @@ func (m *Migrator) ClusterVersion(host string, auth *Auth, proxy string) (*Clust
 
 	if err != nil {
 		log.Error(body, errs)
-		return nil, errs
+		return nil, []error{err}
+	}
+
+	// e.g. a 401 json error body from a secured cluster
+	if len(version.Version.Number) == 0 {
+		log.Errorf("can not get elasticsearch version from %s, check the url and the credentials, response: %s", host, body)
+		return nil, []error{fmt.Errorf("can not get elasticsearch version from %s", host)}
 	}
 	return version, nil
 }
 
-func (m *Migrator) ParseEsApi(isSource bool, host string, authStr string, proxy string, compress bool) ESAPI {
+func (m *Migrator) ParseEsApi(isSource bool, host string, authStr string, apiKey string, proxy string, compress bool) ESAPI {
 	var auth *Auth = nil
-	if len(authStr) > 0 && strings.Contains(authStr, ":") {
-		authArray := strings.Split(authStr, ":")
+	if len(apiKey) > 0 {
+		auth = &Auth{ApiKey: apiKey}
+	} else if len(authStr) > 0 && strings.Contains(authStr, ":") {
+		authArray := strings.SplitN(authStr, ":", 2)
 		auth = &Auth{User: authArray[0], Pass: authArray[1]}
+	}
+	if auth != nil {
 		if isSource {
 			m.SourceAuth = auth
 		} else {
@@ -112,8 +121,8 @@ func (m *Migrator) ParseEsApi(isSource bool, host string, authStr string, proxy 
 	}
 
 	log.Infof("%s es version: %s", esInfo, esVersion.Version.Number)
-	if strings.HasPrefix(esVersion.Version.Number, "8.") {
-		log.Debug("es is v8,", esVersion.Version.Number)
+	if majorVersion(esVersion) >= 8 {
+		log.Debug("es is v8+,", esVersion.Version.Number)
 		api := new(ESAPIV8)
 		api.Host = host
 		api.Compress = compress
@@ -163,6 +172,11 @@ func (m *Migrator) ParseEsApi(isSource bool, host string, authStr string, proxy 
 	}
 }
 
+// targetIsTypeless returns true when the target cluster (8.x and above) does not support mapping types
+func (m *Migrator) targetIsTypeless() bool {
+	return m.TargetESAPI != nil && majorVersion(m.TargetESAPI.ClusterVersion()) >= 8
+}
+
 func (m *Migrator) ClusterReady(api ESAPI) (*ClusterHealth, bool) {
 	health := api.ClusterHealth()
 
@@ -202,10 +216,7 @@ func (m *Migrator) NewBulkWorker(docCount *int, pb *pb.ProgressBar, wg *sync.Wai
 	taskTimeout := time.NewTimer(taskTimeOutDuration)
 	defer taskTimeout.Stop()
 
-	haveTypeField := true
-	if reflect.TypeOf(m.TargetESAPI).String() == "*main.ESAPIV8" {
-		haveTypeField = false
-	}
+	haveTypeField := !m.targetIsTypeless()
 	/*
 		checkKeys := []string{"_index", "_type", "_source", "_id"}
 		if !haveTypeField {
@@ -267,6 +278,12 @@ READ_DOCS:
 				goto WORKER_DONE
 			}
 
+			// system indices can not be written to on 8.x+
+			if !haveTypeField && strings.HasPrefix(src.Index, ".") && !m.Config.CopyAllIndexes && m.Config.TargetIndexName == "" {
+				log.Debugf("skip document %s of system index %s", src.Id, src.Index)
+				continue
+			}
+
 			// sanity check
 			if len(doc.Index) == 0 || len(doc.Type) == 0 && haveTypeField {
 				log.Errorf("failed decoding document: %+v", doc)
@@ -283,6 +300,7 @@ READ_DOCS:
 			// append the doc to the main buffer
 			mainBuf.Write(docBuf.Bytes())
 			mainBuf.Write(src.Source)
+			mainBuf.WriteByte('\n')
 			// reset for next document
 			bulkItemSize++
 			(*docCount)++
@@ -331,13 +349,10 @@ func (m *Migrator) bulkRecords(bulkOp BulkOperation, dstEsApi ESAPI, targetIndex
 	mainBuf := bytes.Buffer{}
 	docBuf := bytes.Buffer{}
 	docEnc := json.NewEncoder(&docBuf)
-	haveTypeField := true
 	//var tempDestIndexName string
 	//var tempTargetTypeName string
 
-	if reflect.TypeOf(dstEsApi).String() == "*main.ESAPIV8" {
-		haveTypeField = false
-	}
+	haveTypeField := majorVersion(dstEsApi.ClusterVersion()) < 8
 
 	for docId, docData := range diffDocMaps {
 		log.Debugf("now will bulk %s docId=%s, docData=%+v", bulkOp, docId, docData)
@@ -452,6 +467,11 @@ func (m *Migrator) SyncBetweenIndex(srcEsApi ESAPI, dstEsApi ESAPI, cfg *Config)
 			dstScroll, err = dstEsApi.NewScroll(cfg.TargetIndexName, cfg.ScrollTime, cfg.DocBufferCount, cfg.Query,
 				cfg.SortField, 0, cfg.ScrollSliceSize, cfg.Fields)
 			if err != nil {
+				if strings.Contains(err.Error(), "indices.id_field_data.enabled") {
+					log.Errorf("can not scroll dest index %s sorted by %s, please enable the cluster setting "+
+						"indices.id_field_data.enabled on the target, reason:%s", cfg.TargetIndexName, cfg.SortField, err.Error())
+					return
+				}
 				log.Errorf("can not scroll for dest index: %s, , reason:%s", cfg.TargetIndexName, err.Error())
 				return
 			} else {
