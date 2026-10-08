@@ -2,7 +2,9 @@
 
 The section of a release is used as the description of its GitHub release.
 
-## Unreleased
+## v0.11.0
+
+`--analyse` checks a migration before running it.
 
 ### Added
 - `--analyse` reads source and target without migrating: it compares the settings and mappings of the indexes,
