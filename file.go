@@ -23,7 +23,9 @@ import (
 	"github.com/cheggaaa/pb"
 	"io"
 	"os"
+	"strings"
 	"sync"
+	"sync/atomic"
 )
 
 func checkFileIsExist(filename string) bool {
@@ -47,19 +49,25 @@ func (m *Migrator) NewFileReadWorker(pb *pb.ProgressBar, wg *sync.WaitGroup) {
 	lineCount := 0
 	for {
 		line, err := r.ReadString('\n')
-		if io.EOF == err || nil != err {
+		if err != nil && err != io.EOF {
+			log.Error("can not read ", m.Config.DumpInputFile, ": ", err)
+			atomic.StoreInt32(&m.Stats.ReadFailed, 1)
 			break
 		}
-		lineCount += 1
-		js := Document{}
-
-		err = DecodeJson(line, &js)
-		if err != nil {
-			log.Error(err)
-			continue
+		// the last line may have no newline
+		if strings.TrimSpace(line) != "" {
+			lineCount += 1
+			js := Document{}
+			if err := DecodeJson(line, &js); err != nil {
+				log.Error(err)
+			} else {
+				m.DocChan <- js
+				pb.Increment()
+			}
 		}
-		m.DocChan <- js
-		pb.Increment()
+		if err == io.EOF {
+			break
+		}
 	}
 
 	defer f.Close()

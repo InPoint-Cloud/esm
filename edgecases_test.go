@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
@@ -345,5 +346,54 @@ func TestDiffCountsUnreachable(t *testing.T) {
 	}
 	if code := run([]string{"-s", "http://127.0.0.1:1", "-d", src.start(t), "--sync", "-x", "idx"}); code != 1 {
 		t.Fatalf("sync exit code %d, want 1", code)
+	}
+}
+
+func TestScrollSort(t *testing.T) {
+	tests := []struct {
+		name    string
+		version string
+		args    []string
+		want    string
+	}{
+		{"migration sorts by _doc", "7.10.2", nil, "_doc"},
+		{"8.x too", "8.11.0", nil, "_doc"},
+		{"no sort before 5.x", "2.4.6", nil, ""},
+		{"explicit sort", "7.10.2", []string{"--sort", "n"}, "n"},
+		{"sync sorts by _id", "7.10.2", []string{"--sync", "-y", "src"}, "_id"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			src := newFakeES(tt.version)
+			src.addIndex("src", 5)
+			dst := newFakeES(tt.version)
+			dst.addIndex("src", 5)
+			args := append([]string{"-s", src.start(t), "-d", dst.start(t), "-x", "src", "-q", "n:*"}, tt.args...)
+			if code := run(args); code != 0 {
+				t.Fatalf("exit code %d", code)
+			}
+			src.mu.Lock()
+			defer src.mu.Unlock()
+			if len(src.sorts) == 0 || src.sorts[0] != tt.want {
+				t.Errorf("scroll sorted by %q, want %q", src.sorts, tt.want)
+			}
+		})
+	}
+}
+
+func TestInputFileFormatting(t *testing.T) {
+	dir := t.TempDir()
+	in, out := filepath.Join(dir, "in.json"), filepath.Join(dir, "out.json")
+	// a blank line, an invalid line and no newline at the end
+	content := `{"_index":"i","_id":"1","_source":{"n":1}}` + "\n\n" + "not json\n" + `{"_index":"i","_id":"2","_source":{"n":2}}`
+	if err := os.WriteFile(in, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if code := run([]string{"-i", in, "-o", out}); code != 0 {
+		t.Fatalf("exit code %d", code)
+	}
+	checkDocs(t, readLines(t, out), 2, "")
+	if n, err := countLines(in); err != nil || n != 3 {
+		t.Errorf("countLines = %d, %v, want 3", n, err)
 	}
 }

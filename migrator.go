@@ -216,10 +216,6 @@ func (m *Migrator) NewBulkWorker(pb *pb.ProgressBar, wg *sync.WaitGroup) {
 	idleTimeout := time.NewTimer(idleDuration)
 	defer idleTimeout.Stop()
 
-	taskTimeOutDuration := 5 * time.Minute
-	taskTimeout := time.NewTimer(taskTimeOutDuration)
-	defer taskTimeout.Stop()
-
 	haveTypeField := !m.targetIsTypeless()
 	// 7.x accepts documents without a type, older versions require one
 	targetNeedsType := haveTypeField && majorVersion(m.TargetESAPI.ClusterVersion()) < 7
@@ -235,7 +231,6 @@ func (m *Migrator) NewBulkWorker(pb *pb.ProgressBar, wg *sync.WaitGroup) {
 READ_DOCS:
 	for {
 		idleTimeout.Reset(idleDuration)
-		taskTimeout.Reset(taskTimeOutDuration)
 		select {
 		case src, open := <-m.DocChan:
 			// if channel is closed flush and gtfo
@@ -305,11 +300,9 @@ READ_DOCS:
 			}
 
 		case <-idleTimeout.C:
+			// send what is buffered while the source is slow, the worker only stops when DocChan is closed
 			log.Debug("5s no message input")
 			flush()
-		case <-taskTimeout.C:
-			log.Warn("5m no message input, close worker")
-			goto WORKER_DONE
 		}
 		goto READ_DOCS
 	}

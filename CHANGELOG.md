@@ -2,6 +2,20 @@
 
 The section of a release is used as the description of its GitHub release.
 
+## v0.10.1
+
+Fixes for large migrations, tested with 25MB documents and 1 million documents.
+
+### Fixed
+- The bulk workers stopped when the source sent nothing for 5 minutes, the migration could hang.
+- The last document of an input file (`-i`) was dropped when the file did not end with a newline,
+  read errors of the file were ignored.
+
+### Changed
+- The scroll is sorted by `_doc` instead of `_id` by default, the fastest order. Sorting by `_id` loads all ids
+  into the heap of the source cluster, a problem for large indexes. `--sync` still sorts by `_id`.
+- The README explains the settings for large documents (`-c`, `--buffer_count`).
+
 ## v0.10.0
 
 ### Fixed

@@ -102,6 +102,10 @@ func (m *Migrator) runSync() int {
 	if len(c.TargetIndexName) == 0 {
 		c.TargetIndexName = c.SourceIndexNames
 	}
+	// sync walks source and target in the same order to compare them
+	if c.SortField == "" {
+		c.SortField = "_id"
+	}
 	if !m.connect() {
 		return 1
 	}

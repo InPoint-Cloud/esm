@@ -29,6 +29,7 @@ type fakeES struct {
 	auth        string // required Authorization header
 	health      string // cluster health status of the next healthChecks requests, then green
 	healthCheck int
+	sorts       []string // the sort of every new scroll, "" without one
 
 	mu       sync.Mutex
 	indices  map[string]*fakeIndex
@@ -314,8 +315,10 @@ func (f *fakeES) handle(w http.ResponseWriter, r *http.Request) {
 func (f *fakeES) newScroll(indices []string, r *http.Request, body []byte) interface{} {
 	var q struct {
 		Slice *struct{ Id, Max int } `json:"slice"`
+		Sort  []string               `json:"sort"`
 	}
 	json.Unmarshal(body, &q)
+	f.sorts = append(f.sorts, strings.Join(q.Sort, ","))
 	size, _ := strconv.Atoi(r.URL.Query().Get("size"))
 	if size <= 0 {
 		size = 10

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -126,9 +127,9 @@ func (m *Migrator) startScrollReaders(wg *sync.WaitGroup, fetchBar, outputBar *p
 		return fmt.Errorf("can not connect to the source elasticsearch")
 	}
 
-	// sorting on _id needs fielddata, which is disabled by default since 8.0
-	if c.SortField == "_id" && majorVersion(m.SourceESAPI.ClusterVersion()) >= 8 {
-		log.Info("source es is 8.x+, sorting by _doc instead of _id")
+	// _doc is the cheapest order, sorting by _id loads all ids into the heap of the source (fielddata),
+	// which is disabled by default since 8.0. Versions before 5.x scan without sorting.
+	if c.SortField == "" && majorVersion(m.SourceESAPI.ClusterVersion()) >= 5 {
 		c.SortField = "_doc"
 	}
 	if c.ScrollSliceSize < 1 {
@@ -193,14 +194,16 @@ func countLines(path string) (int, error) {
 	lineCount := 0
 	r := bufio.NewReader(f)
 	for {
-		_, err := r.ReadString('\n')
+		line, err := r.ReadString('\n')
+		if err != nil && err != io.EOF {
+			return lineCount, err
+		}
+		if strings.TrimSpace(line) != "" {
+			lineCount++
+		}
 		if err == io.EOF {
 			return lineCount, nil
 		}
-		if err != nil {
-			return lineCount, err
-		}
-		lineCount++
 	}
 }
 

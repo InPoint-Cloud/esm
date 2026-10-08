@@ -41,6 +41,15 @@ The options that matter most:
 * `-c` the number of documents per scroll page, `-b` the bulk request size in MB
 * `--buffer_count` the number of documents buffered in memory between reading and writing
 
+Large documents (ie: 20MB each) need smaller pages and buffers, the source holds a scroll page in its heap
+and ESM holds up to `--buffer_count` documents in memory:
+
+```
+./esm -s http://localhost:9200 -d http://localhost:9201 -x files -c 2 --buffer_count=50 -w 2
+```
+
+A single document can not be larger than `http.max_content_length` of the target (100MB by default).
+
 ## Before ESM
 
 Before running the esm, please manually prepare the target index with mapping and optimized settings to improve the speed, for example:
@@ -227,7 +236,7 @@ Application Options:
   -q, --query=                     query against source elasticsearch instance,
                                    filter data before migrate, ie: name:john
       --sort=                      sort field when scroll, ie: _id (default:
-                                   _id)
+                                   _doc, the fastest order, --sync uses _id)
   -d, --dest=                      destination elasticsearch instance, ie:
                                    http://localhost:9201
   -m, --source_auth=               basic auth of source elasticsearch instance,
