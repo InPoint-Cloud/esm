@@ -50,6 +50,34 @@ and ESM holds up to `--buffer_count` documents in memory:
 
 A single document can not be larger than `http.max_content_length` of the target (100MB by default).
 
+## Analyse before migrating
+
+`--analyse` reads the source and target clusters and indexes without migrating anything. It compares the settings
+and mappings of every source index with its target index, reports what will fail or behave unexpectedly, and suggests
+ESM flags and Elasticsearch settings. `-d` is optional, without it only the source is analysed.
+
+```
+./esm -s http://localhost:9200 -d https://localhost:9201 -n elastic:passwd -x "logs-*" --copy_settings --copy_mappings --analyse
+```
+
+It reports:
+
+* the version, data nodes, `http.max_content_length` and `indices.id_field_data.enabled` of both clusters
+* per index: documents, shards, size on disk and the average document size, the differences of settings and mappings,
+  ie: a field that is `long` in the source and `keyword` in the target
+* problems: a disabled `_source`, closed indexes, several mapping types, `string` fields or `_all` copied to 5.x/7.x+,
+  fields missing in a `dynamic: strict` target, existing documents in the target
+* `-c` and `--buffer_count` for the average document size, `-w` and `--sliced_scroll_size` for large indexes,
+  `-b` and `http.max_content_length` for large documents, `--shards` for primary shards above 50GB,
+  `--copy_settings --copy_mappings` for missing target indexes, and `indices.id_field_data.enabled` for `--sync` on 8.x+
+* the migration command with the suggested flags
+
+The exit code is 0 when the migration can run, 2 when the analysis found an `ERROR` that makes it fail
+(ie: in CI before a migration), and 1 when a cluster can not be reached or no source index matches.
+
+The average document size is estimated from the size of the primary shards on disk, which is compressed:
+the documents sent over the network are usually larger.
+
 ## Before ESM
 
 Before running the esm, please manually prepare the target index with mapping and optimized settings to improve the speed, for example:
@@ -307,6 +335,10 @@ Application Options:
                                    (default: -1)
       --diff_counts                count the difference between source and
                                    target indexes
+      --analyse                    analyse source and target without migrating:
+                                   compare the settings and mappings of the
+                                   indexes, suggest esm flags and elasticsearch
+                                   settings
       --remain_routing_allocation  keep routing allocation in mappings
       --only_meta                  only sync meta
       --dry                        only dry

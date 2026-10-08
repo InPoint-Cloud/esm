@@ -47,6 +47,12 @@ func run(args []string) int {
 		}()
 	}
 
+	// --analyse only reads, the target is optional
+	if c.Analyse {
+		m := &Migrator{Config: c}
+		return m.runAnalyse()
+	}
+
 	if err := validateConfig(c); err != nil {
 		log.Error(err)
 		return 1

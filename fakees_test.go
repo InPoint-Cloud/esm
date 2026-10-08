@@ -30,6 +30,11 @@ type fakeES struct {
 	health      string // cluster health status of the next healthChecks requests, then green
 	healthCheck int
 	sorts       []string // the sort of every new scroll, "" without one
+	dataNodes   int      // number_of_data_nodes of the cluster health
+	// persistent cluster settings, ie: indices.id_field_data.enabled
+	clusterSettings map[string]interface{}
+	// http.max_content_length set on the nodes, "" for the default
+	maxContentLength string
 
 	mu       sync.Mutex
 	indices  map[string]*fakeIndex
@@ -176,7 +181,30 @@ func (f *fakeES) handle(w http.ResponseWriter, r *http.Request) {
 			f.healthCheck--
 			health = f.health
 		}
-		reply(200, map[string]string{"cluster_name": "fake", "status": health})
+		reply(200, map[string]interface{}{"cluster_name": "fake", "status": health, "number_of_data_nodes": max(f.dataNodes, 1)})
+	case r.URL.Path == "/_cluster/settings":
+		if r.Method == http.MethodPut {
+			var req struct {
+				Persistent map[string]interface{} `json:"persistent"`
+			}
+			json.Unmarshal(body, &req)
+			if f.clusterSettings == nil {
+				f.clusterSettings = map[string]interface{}{}
+			}
+			for k, v := range req.Persistent {
+				f.clusterSettings[k] = v
+			}
+			reply(200, map[string]bool{"acknowledged": true})
+			return
+		}
+		reply(200, map[string]interface{}{"persistent": f.clusterSettings, "transient": map[string]interface{}{},
+			"defaults": map[string]interface{}{"http.max_content_length": "100mb"}})
+	case r.URL.Path == "/_nodes/settings":
+		settings := map[string]interface{}{}
+		if f.maxContentLength != "" {
+			settings["http"] = map[string]interface{}{"max_content_length": f.maxContentLength}
+		}
+		reply(200, map[string]interface{}{"nodes": map[string]interface{}{"node1": map[string]interface{}{"settings": settings}}})
 	case r.URL.Path == "/_bulk":
 		if len(f.bulkStatus) > 0 {
 			status := f.bulkStatus[0]
@@ -209,10 +237,23 @@ func (f *fakeES) handle(w http.ResponseWriter, r *http.Request) {
 			id = p.ScrollId
 		}
 		reply(200, f.scrollPage(id))
-	case parts[0] == "_cat" && len(parts) == 2 && parts[1] == "indices":
-		var rows []map[string]string
+	case parts[0] == "_cat" && len(parts) >= 2 && parts[1] == "indices":
+		rows := []map[string]string{}
 		for name, idx := range f.indices {
-			rows = append(rows, map[string]string{"index": name, "health": "green", "status": "open", "docs.count": strconv.Itoa(len(idx.docs))})
+			if len(parts) == 3 && !matchesAny(parts[2], name) {
+				continue
+			}
+			size := 0
+			for _, d := range idx.docs {
+				size += len(d.source)
+			}
+			rows = append(rows, map[string]string{"index": name, "health": "green", "status": "open", "docs.count": strconv.Itoa(len(idx.docs)),
+				"pri": fmt.Sprint(idx.settings["number_of_shards"]), "rep": fmt.Sprint(idx.settings["number_of_replicas"]),
+				"pri.store.size": strconv.Itoa(size)})
+		}
+		if len(rows) == 0 && len(parts) == 3 {
+			notFound(parts[2])
+			return
 		}
 		reply(200, rows)
 	case len(parts) == 1:
@@ -247,11 +288,9 @@ func (f *fakeES) handle(w http.ResponseWriter, r *http.Request) {
 	case len(parts) >= 2:
 		names, action := parts[0], parts[len(parts)-1]
 		var existing []string
-		for _, pattern := range strings.Split(names, ",") {
-			for n := range f.indices {
-				if ok, _ := path.Match(pattern, n); ok || pattern == "_all" {
-					existing = append(existing, n)
-				}
+		for n := range f.indices {
+			if matchesAny(names, n) {
+				existing = append(existing, n)
 			}
 		}
 		sort.Strings(existing)
@@ -310,6 +349,16 @@ func (f *fakeES) handle(w http.ResponseWriter, r *http.Request) {
 	default:
 		reply(404, map[string]string{"error": "unknown request"})
 	}
+}
+
+// matchesAny returns true if the index name matches one of the comma separated patterns
+func matchesAny(patterns, name string) bool {
+	for _, pattern := range strings.Split(patterns, ",") {
+		if ok, _ := path.Match(pattern, name); ok || pattern == "_all" {
+			return true
+		}
+	}
+	return false
 }
 
 func (f *fakeES) newScroll(indices []string, r *http.Request, body []byte) interface{} {

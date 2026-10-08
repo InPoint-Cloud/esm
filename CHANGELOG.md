@@ -2,6 +2,15 @@
 
 The section of a release is used as the description of its GitHub release.
 
+## Unreleased
+
+### Added
+- `--analyse` reads source and target without migrating: it compares the settings and mappings of the indexes,
+  reports problems (ie: field types that differ, `string` fields for 5.x+, a disabled `_source`, several mapping types)
+  and suggests flags (`-c`, `--buffer_count`, `-w`, `--sliced_scroll_size`, `-b`, `--shards`, `--copy_settings`)
+  and Elasticsearch settings (`http.max_content_length`, `indices.id_field_data.enabled` for `--sync` on 8.x+).
+  It exits with 2 when it finds an error that makes the migration fail.
+
 ## v0.10.1
 
 Fixes for large migrations, tested with 25MB documents and 1 million documents.

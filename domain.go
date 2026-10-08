@@ -168,6 +168,7 @@ type Config struct {
 	RegenerateID                   bool   `short:"r" long:"regenerate_id"   description:"regenerate id for documents, this will override the exist document id in data source"`
 	SleepSecondsAfterEachBulk      int    `short:"p" long:"sleep" description:"sleep N seconds after each bulk request" default:"-1"`
 	DiffCounts                     bool   `long:"diff_counts" description:"count the difference between source and target indexes"`
+	Analyse                        bool   `long:"analyse" description:"analyse source and target without migrating: compare the settings and mappings of the indexes, suggest esm flags and elasticsearch settings"`
 	RemainMappingRoutingAllocation bool   `long:"remain_routing_allocation" description:"keep routing allocation in mappings"`
 	OnlyMeta                       bool   `long:"only_meta" description:"only sync meta"`
 	Dry                            bool   `long:"dry" description:"only dry"`

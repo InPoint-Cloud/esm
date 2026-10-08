@@ -194,6 +194,26 @@ func TestIntegration(t *testing.T) {
 		}
 	})
 
+	t.Run("analyse", func(t *testing.T) {
+		var out string
+		args := append(append(append([]string{}, srcArgs...), dstArgs...), "-x", "esm-it-src", "-y", "esm-it-dst", "-c", "300", "--analyse")
+		out = captureStdout(t, func() { esm(t, 0, args...) })
+		t.Log(out)
+		for _, want := range []string{"index esm-it-src => esm-it-dst", "source: 2000 documents, 2 primary shards, 0 replicas",
+			"target: 2000 documents", "settings:", "mappings:", "suggested command"} {
+			if !strings.Contains(out, want) {
+				t.Errorf("output does not contain %q", want)
+			}
+		}
+		// the target was migrated with the settings and mappings of the source
+		if strings.Contains(out, "field n is") || strings.Contains(out, "field title is") {
+			t.Error("field types of source and target differ")
+		}
+		if n := dst.count(t, "esm-it-dst"); n != itDocs {
+			t.Errorf("target has %d documents after --analyse, want %d", n, itDocs)
+		}
+	})
+
 	if strings.HasPrefix(dst.url, "https") {
 		t.Run("self-signed certificate is rejected", func(t *testing.T) {
 			args := append(append([]string{}, srcArgs...), "-d", dst.url, "-n", dst.auth, "-x", "esm-it-src", "-y", "esm-it-tls")
