@@ -2,6 +2,12 @@
 
 The section of a release is used as the description of its GitHub release.
 
+## v0.11.1
+
+### Changed
+- The README was reworked: install and quick start sections, `--sync` options, a table of exit codes,
+  examples grouped by task, and the outdated scroll sort note fixed.
+
 ## v0.11.0
 
 `--analyse` checks a migration before running it.
