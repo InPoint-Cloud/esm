@@ -908,7 +908,7 @@ func maxContentString(ca *clusterAnalysis) string {
 }
 
 func indexSummary(idx *indexAnalysis) string {
-	s := fmt.Sprintf("%s, %s, %s, %s", plural(int(idx.docs), "document"), plural(idx.shards, "primary shard"),
+	s := fmt.Sprintf("%s, %s, %s, %s", plural(idx.docs, "document"), plural(idx.shards, "primary shard"),
 		plural(idx.replicas, "replica"), formatBytes(idx.priBytes))
 	if avg := idx.avgDocBytes(); avg > 0 {
 		s += fmt.Sprintf(" (about %s per document)", formatBytes(avg))
@@ -946,7 +946,7 @@ func writeFindings(w io.Writer, findings []finding) {
 	}
 }
 
-func plural(n int, word string) string {
+func plural[T int | int64](n T, word string) string {
 	if n == 1 {
 		return "1 " + word
 	}
