@@ -2,6 +2,12 @@
 
 The section of a release is used as the description of its GitHub release.
 
+## v0.11.2
+
+### Fixed
+- `--analyse` converted the document count of an index to `int`, a count above 2^31 was shown wrong on
+  32-bit builds (code scanning alert #1).
+
 ## v0.11.1
 
 ### Changed
