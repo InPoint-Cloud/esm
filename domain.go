@@ -18,6 +18,9 @@ package main
 
 import (
 	"encoding/json"
+	"os"
+	"sync"
+	"time"
 )
 
 type Indexes map[string]interface{}
@@ -122,47 +125,54 @@ type Migrator struct {
 
 	// settings changed during the migration (refresh_interval, number_of_replicas), restored when finished
 	settingsToRestore []map[string]interface{}
+	// guards settingsToRestore and interrupted, the settings are also restored on SIGINT/SIGTERM
+	settingsLock sync.Mutex
+	interrupted  bool
+
+	// the --output_file
+	dumpFile *os.File
 }
 
 type Config struct {
 
 	// config options
-	SourceEs          string `short:"s" long:"source"  description:"source elasticsearch instance, ie: http://localhost:9200"`
-	Query             string `short:"q" long:"query"  description:"query against source elasticsearch instance, filter data before migrate, ie: name:john"`
-	SortField         string `long:"sort" description:"sort field when scroll, ie: _id (default: _doc, the fastest order, --sync uses _id)"`
-	TargetEs          string `short:"d" long:"dest"    description:"destination elasticsearch instance, ie: http://localhost:9201"`
-	SourceEsAuthStr   string `short:"m" long:"source_auth"  description:"basic auth of source elasticsearch instance, ie: user:pass"`
-	TargetEsAuthStr   string `short:"n" long:"dest_auth"  description:"basic auth of target elasticsearch instance, ie: user:pass"`
-	SourceEsApiKey    string `long:"source_api_key"  description:"api key of source elasticsearch instance (base64 encoded id:api_key), used instead of source_auth"`
-	TargetEsApiKey    string `long:"dest_api_key"  description:"api key of target elasticsearch instance (base64 encoded id:api_key), used instead of dest_auth"`
-	DocBufferCount    int    `short:"c" long:"count"   description:"number of documents at a time: ie \"size\" in the scroll request" default:"10000"`
-	BufferCount       int    `long:"buffer_count"   description:"number of buffered documents in memory" default:"1000000"`
-	Workers           int    `short:"w" long:"workers" description:"concurrency number for bulk workers" default:"1"`
-	BulkSizeInMB      int    `short:"b" long:"bulk_size" description:"bulk size in MB" default:"5"`
-	ScrollTime        string `short:"t" long:"time"    description:"scroll time" default:"10m"`
-	ScrollSliceSize   int    `long:"sliced_scroll_size"    description:"size of sliced scroll, to make it work, the size should be > 1" default:"1"`
-	RecreateIndex     bool   `short:"f" long:"force"   description:"delete destination index before copying"`
-	CopyAllIndexes    bool   `short:"a" long:"all"     description:"copy indexes starting with . and _"`
-	CopyIndexSettings bool   `long:"copy_settings"          description:"copy index settings from source"`
-	CopyIndexMappings bool   `long:"copy_mappings"          description:"copy index mappings from source"`
-	ShardsCount       int    `long:"shards"            description:"set a number of shards on newly created indexes"`
-	SourceIndexNames  string `short:"x" long:"src_indexes" description:"indexes name to copy,support regex and comma separated list" default:"_all"`
-	TargetIndexName   string `short:"y" long:"dest_index" description:"indexes name to save, allow only one indexname, original indexname will be used if not specified" default:""`
-	OverrideTypeName  string `short:"u" long:"type_override" description:"override type name" default:""`
-	WaitForGreen      bool   `long:"green"             description:"wait for both hosts cluster status to be green before dump. otherwise yellow is okay"`
-	LogLevel          string `short:"v" long:"log"            description:"setting log level,options:trace,debug,info,warn,error"  default:"INFO"`
-	LogFile           string `long:"log_file" description:"also write the log to this file"`
-	Insecure          bool   `long:"insecure" description:"skip verifying the TLS certificates of source and target, ie: for self-signed certificates"`
-	Pprof             string `long:"pprof" description:"start a pprof server, on 127.0.0.1:6060 or the given address" optional:"yes" optional-value:"127.0.0.1:6060"`
-	DumpOutFile       string `short:"o" long:"output_file"            description:"output documents of source index into local file" `
-	TruncateOutFile   bool   `long:"truncate_output" description:"truncate before dump to output file" `
-	DumpInputFile     string `short:"i" long:"input_file"            description:"indexing from local dump file" `
-	SourceProxy       string `long:"source_proxy"            description:"set proxy to source http connections, ie: http://127.0.0.1:8080"`
-	TargetProxy       string `long:"dest_proxy"            description:"set proxy to target http connections, ie: http://127.0.0.1:8080"`
-	Refresh           bool   `long:"refresh"                 description:"refresh after migration finished"`
-	Sync              bool   `long:"sync"                   description:"sync will use scroll for both source and target index, compare the data and sync(index/update/delete)"`
-	Fields            string `long:"fields"                 description:"filter source fields(white list), comma separated, ie: col1,col2,col3,..." `
-	SkipFields        string `long:"skip"                   description:"skip source fields(black list), comma separated, ie: col1,col2,col3,..." `
+	SourceEs          string        `short:"s" long:"source"  description:"source elasticsearch instance, ie: http://localhost:9200"`
+	Query             string        `short:"q" long:"query"  description:"query against source elasticsearch instance, filter data before migrate, ie: name:john"`
+	SortField         string        `long:"sort" description:"sort field when scroll, ie: _id (default: _doc, the fastest order, --sync uses _id)"`
+	TargetEs          string        `short:"d" long:"dest"    description:"destination elasticsearch instance, ie: http://localhost:9201"`
+	SourceEsAuthStr   string        `short:"m" long:"source_auth"  description:"basic auth of source elasticsearch instance, ie: user:pass"`
+	TargetEsAuthStr   string        `short:"n" long:"dest_auth"  description:"basic auth of target elasticsearch instance, ie: user:pass"`
+	SourceEsApiKey    string        `long:"source_api_key"  description:"api key of source elasticsearch instance (base64 encoded id:api_key), used instead of source_auth"`
+	TargetEsApiKey    string        `long:"dest_api_key"  description:"api key of target elasticsearch instance (base64 encoded id:api_key), used instead of dest_auth"`
+	DocBufferCount    int           `short:"c" long:"count"   description:"number of documents at a time: ie \"size\" in the scroll request" default:"10000"`
+	BufferCount       int           `long:"buffer_count"   description:"number of buffered documents in memory" default:"1000000"`
+	Workers           int           `short:"w" long:"workers" description:"concurrency number for bulk workers" default:"1"`
+	BulkSizeInMB      int           `short:"b" long:"bulk_size" description:"bulk size in MB" default:"5"`
+	ScrollTime        string        `short:"t" long:"time"    description:"scroll time" default:"10m"`
+	ScrollSliceSize   int           `long:"sliced_scroll_size"    description:"size of sliced scroll, to make it work, the size should be > 1" default:"1"`
+	RecreateIndex     bool          `short:"f" long:"force"   description:"delete destination index before copying"`
+	CopyAllIndexes    bool          `short:"a" long:"all"     description:"copy indexes starting with . and _"`
+	CopyIndexSettings bool          `long:"copy_settings"          description:"copy index settings from source"`
+	CopyIndexMappings bool          `long:"copy_mappings"          description:"copy index mappings from source"`
+	ShardsCount       int           `long:"shards"            description:"set a number of shards on newly created indexes"`
+	SourceIndexNames  string        `short:"x" long:"src_indexes" description:"indexes name to copy,support regex and comma separated list" default:"_all"`
+	TargetIndexName   string        `short:"y" long:"dest_index" description:"indexes name to save, allow only one indexname, original indexname will be used if not specified" default:""`
+	OverrideTypeName  string        `short:"u" long:"type_override" description:"override type name" default:""`
+	WaitForGreen      bool          `long:"green"             description:"wait for both clusters to be green before migrating, otherwise yellow is okay (a red cluster is always waited for)"`
+	LogLevel          string        `short:"v" long:"log"            description:"setting log level,options:trace,debug,info,warn,error"  default:"INFO"`
+	LogFile           string        `long:"log_file" description:"also write the log to this file"`
+	Insecure          bool          `long:"insecure" description:"skip verifying the TLS certificates of source and target, ie: for self-signed certificates"`
+	RequestTimeout    time.Duration `long:"request_timeout" description:"timeout of a request to elasticsearch including the response, ie: 30s, 10m, 0 disables it. A timed out request is retried like a network error" default:"10m"`
+	Pprof             string        `long:"pprof" description:"start a pprof server, on 127.0.0.1:6060 or the given address" optional:"yes" optional-value:"127.0.0.1:6060"`
+	DumpOutFile       string        `short:"o" long:"output_file"            description:"output documents of source index into local file" `
+	TruncateOutFile   bool          `long:"truncate_output" description:"truncate before dump to output file" `
+	DumpInputFile     string        `short:"i" long:"input_file"            description:"indexing from local dump file" `
+	SourceProxy       string        `long:"source_proxy"            description:"set proxy to source http connections, ie: http://127.0.0.1:8080"`
+	TargetProxy       string        `long:"dest_proxy"            description:"set proxy to target http connections, ie: http://127.0.0.1:8080"`
+	Refresh           bool          `long:"refresh"                 description:"refresh after migration finished"`
+	Sync              bool          `long:"sync"                   description:"sync will use scroll for both source and target index, compare the data and sync(index/update/delete)"`
+	Fields            string        `long:"fields"                 description:"filter source fields(white list), comma separated, ie: col1,col2,col3,..." `
+	SkipFields        string        `long:"skip"                   description:"skip source fields(black list), comma separated, ie: col1,col2,col3,..." `
 
 	RepeatOutputTimes              int    `long:"repeat_times"            description:"repeat the data from source N times to dest output, use align with parameter regenerate_id to amplify the data size "`
 	RegenerateID                   bool   `short:"r" long:"regenerate_id"   description:"regenerate id for documents, this will override the exist document id in data source"`

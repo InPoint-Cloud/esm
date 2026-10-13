@@ -28,25 +28,20 @@ import (
 	"sync/atomic"
 )
 
-func checkFileIsExist(filename string) bool {
-	var exist = true
-	if _, err := os.Stat(filename); os.IsNotExist(err) {
-		exist = false
-	}
-	return exist
-}
-
 func (m *Migrator) NewFileReadWorker(pb *pb.ProgressBar, wg *sync.WaitGroup) {
+	defer wg.Done()
+	// the workers stop when DocChan is closed, also if the file can not be read
+	defer close(m.DocChan)
 	log.Debug("start reading file")
 	f, err := os.Open(m.Config.DumpInputFile)
 	if err != nil {
 		log.Error(err)
+		atomic.StoreInt32(&m.Stats.ReadFailed, 1)
 		return
 	}
-
 	defer f.Close()
+
 	r := bufio.NewReader(f)
-	lineCount := 0
 	for {
 		line, err := r.ReadString('\n')
 		if err != nil && err != io.EOF {
@@ -56,7 +51,6 @@ func (m *Migrator) NewFileReadWorker(pb *pb.ProgressBar, wg *sync.WaitGroup) {
 		}
 		// the last line may have no newline
 		if strings.TrimSpace(line) != "" {
-			lineCount += 1
 			js := Document{}
 			if err := DecodeJson(line, &js); err != nil {
 				log.Error(err)
@@ -69,40 +63,25 @@ func (m *Migrator) NewFileReadWorker(pb *pb.ProgressBar, wg *sync.WaitGroup) {
 			break
 		}
 	}
-
-	defer f.Close()
 	log.Debug("end reading file")
-	close(m.DocChan)
-	wg.Done()
 }
 
-func (c *Migrator) NewFileDumpWorker(pb *pb.ProgressBar, wg *sync.WaitGroup) {
-	var f *os.File
-	var err1 error
-
-	if checkFileIsExist(c.Config.DumpOutFile) {
-		flag := os.O_WRONLY
-		if c.Config.TruncateOutFile {
-			flag |= os.O_TRUNC
-		} else {
-			flag |= os.O_APPEND
-		}
-		f, err1 = os.OpenFile(c.Config.DumpOutFile, flag, os.ModeAppend)
-		if err1 != nil {
-			log.Error(err1)
-			return
-		}
-
-	} else {
-		f, err1 = os.Create(c.Config.DumpOutFile)
-		if err1 != nil {
-			log.Error(err1)
-			return
-		}
+// openDumpOutput opens the --output_file, it is truncated with --truncate_output and appended to otherwise
+func openDumpOutput(path string, truncate bool) (*os.File, error) {
+	flag := os.O_WRONLY | os.O_CREATE | os.O_APPEND
+	if truncate {
+		flag = os.O_WRONLY | os.O_CREATE | os.O_TRUNC
 	}
+	return os.OpenFile(path, flag, 0644)
+}
 
+// NewFileDumpWorker writes the documents of DocChan to f. After a write error it keeps reading
+// DocChan without writing, so the readers do not block, and marks the output as failed.
+func (c *Migrator) NewFileDumpWorker(f *os.File, pb *pb.ProgressBar, wg *sync.WaitGroup) {
+	defer wg.Done()
 	w := bufio.NewWriter(f)
 	skipFields := splitFieldList(c.Config.SkipFields)
+	var writeErr error
 
 	for docI := range c.DocChan {
 		if source, err := removeSourceFields(docI.Source, skipFields); err != nil {
@@ -117,16 +96,22 @@ func (c *Migrator) NewFileDumpWorker(pb *pb.ProgressBar, wg *sync.WaitGroup) {
 			log.Error(err)
 			continue
 		}
-		w.Write(jsr)
-		if err := w.WriteByte('\n'); err != nil {
-			log.Error(err)
+		jsr = append(jsr, '\n')
+		// bufio.Writer keeps the first error, the following writes fail too
+		if _, writeErr = w.Write(jsr); writeErr != nil {
+			break
 		}
 		pb.Increment()
 	}
-
-	w.Flush()
-	f.Close()
-
-	wg.Done()
+	if writeErr == nil {
+		writeErr = w.Flush()
+	}
+	if writeErr != nil {
+		log.Error("can not write output file ", c.Config.DumpOutFile, ": ", writeErr)
+		atomic.StoreInt32(&c.Stats.WriteFailed, 1)
+		// drain the docs, the readers block on a full channel otherwise
+		for range c.DocChan {
+		}
+	}
 	log.Debug("file dump finished")
 }

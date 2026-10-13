@@ -7,7 +7,10 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
+	"runtime"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -464,4 +467,165 @@ func TestBulkTooLarge(t *testing.T) {
 			t.Errorf("failed output has %d lines, want 20", len(lines))
 		}
 	})
+}
+
+func TestInterruptRestoresSettings(t *testing.T) {
+	self, err := os.FindProcess(os.Getpid())
+	if err != nil || runtime.GOOS == "windows" {
+		t.Skip("can not send SIGINT")
+	}
+	src := newFakeES("7.10.2")
+	src.addIndex("src", 10)
+	dst := newFakeES("8.11.0")
+
+	type exit struct {
+		code     int
+		settings map[string]interface{}
+	}
+	exited := make(chan exit, 1)
+	orig := exitFunc
+	exitFunc = func(code int) {
+		// copied before the migration goes on, the test does not exit
+		settings := map[string]interface{}{}
+		for k, v := range dst.settings("dst") {
+			settings[k] = v
+		}
+		exited <- exit{code, settings}
+	}
+	t.Cleanup(func() { exitFunc = orig })
+
+	var once sync.Once
+	var got *exit
+	dstURL := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/_bulk" {
+			// interrupted while the documents are copied, after the index was created
+			once.Do(func() {
+				self.Signal(os.Interrupt)
+				select {
+				case e := <-exited:
+					got = &e
+				case <-time.After(5 * time.Second):
+				}
+			})
+		}
+		dst.handle(w, r)
+	}))
+	t.Cleanup(dstURL.Close)
+
+	code := run([]string{"-s", src.start(t), "-d", dstURL.URL, "-x", "src", "-y", "dst", "--copy_settings"})
+	if got == nil {
+		t.Fatalf("not interrupted, exit code %d", code)
+	}
+	if got.code != 130 {
+		t.Errorf("exit code %d, want 130", got.code)
+	}
+	if fmt.Sprint(got.settings["refresh_interval"]) != "5s" || fmt.Sprint(got.settings["number_of_replicas"]) != "1" {
+		t.Errorf("settings not restored on interrupt: %v", got.settings)
+	}
+}
+
+func TestDumpOutputErrors(t *testing.T) {
+	es := newFakeES("7.10.2")
+	es.addIndex("src", 10)
+	url := es.start(t)
+	dir := t.TempDir()
+
+	done := make(chan int)
+	go func() {
+		done <- run([]string{"-s", url, "-x", "src", "-o", filepath.Join(dir, "no", "such", "dir", "out.json")})
+	}()
+	select {
+	case code := <-done:
+		if code != 1 {
+			t.Errorf("unwritable output file: exit code %d, want 1", code)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("unwritable output file: esm hangs")
+	}
+
+	if _, err := os.Stat("/dev/full"); err == nil {
+		if code := run([]string{"-s", url, "-x", "src", "-o", "/dev/full"}); code != 1 {
+			t.Errorf("full disk: exit code %d, want 1", code)
+		}
+	}
+}
+
+func TestRepeatTimesWithTruncateOutput(t *testing.T) {
+	es := newFakeES("7.10.2")
+	es.addIndex("src", 10)
+	out := filepath.Join(t.TempDir(), "dump.json")
+	os.WriteFile(out, []byte(`{"_index":"old","_id":"1","_source":{}}`+"\n"), 0644)
+
+	if code := run([]string{"-s", es.start(t), "-x", "src", "-o", out, "--truncate_output", "--repeat_times", "3"}); code != 0 {
+		t.Fatalf("exit code %d", code)
+	}
+	if n := len(readLines(t, out)); n != 30 {
+		t.Errorf("%d lines, want the 30 documents of all rounds", n)
+	}
+}
+
+func TestSyncIgnoresSlicedScroll(t *testing.T) {
+	src := newFakeES("7.10.2")
+	src.addIndex("idx", 100)
+	dst := newFakeES("7.10.2")
+	dst.addIndex("idx", 0)
+	for i := 0; i < 100; i += 2 {
+		dst.putDoc("idx", fmt.Sprintf("%04d", i), "_doc", `{"n":-1}`)
+	}
+	dst.putDoc("idx", "9999", "_doc", `{"n":-1}`)
+
+	if code := run([]string{"-s", src.start(t), "-d", dst.start(t), "-x", "idx", "--sync", "--enable_delete",
+		"--sliced_scroll_size", "4", "-c", "10"}); code != 0 {
+		t.Fatalf("exit code %d", code)
+	}
+	if got, want := dst.docs("idx"), src.docs("idx"); !reflect.DeepEqual(got, want) {
+		t.Errorf("target has %d documents, source %d", len(got), len(want))
+	}
+}
+
+func TestWaitForRedWithoutGreen(t *testing.T) {
+	fastRetries(t)
+	src := newFakeES("7.10.2")
+	src.addIndex("src", 10)
+	src.health, src.healthCheck = "yellow", 3
+	dst := newFakeES("7.10.2")
+	dst.health, dst.healthCheck = "red", 2
+
+	if code := run([]string{"-s", src.start(t), "-d", dst.start(t), "-x", "src", "-y", "dst"}); code != 0 {
+		t.Fatalf("exit code %d", code)
+	}
+	if src.healthCheck != 2 {
+		t.Errorf("waited for the yellow source, %d health checks left", src.healthCheck)
+	}
+	if dst.healthCheck != 0 {
+		t.Error("did not wait for the red target")
+	}
+	checkDocs(t, values(dst.docs("dst")), 10, "")
+}
+
+func TestRequestTimeout(t *testing.T) {
+	fastRetries(t)
+	src := newFakeES("7.10.2")
+	src.addIndex("src", 10)
+	dst := newFakeES("7.10.2")
+
+	var hung int32
+	dstURL := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// the first bulk request hangs, the retry succeeds
+		if r.URL.Path == "/_bulk" && atomic.AddInt32(&hung, 1) == 1 {
+			time.Sleep(time.Second)
+			return
+		}
+		dst.handle(w, r)
+	}))
+	t.Cleanup(dstURL.Close)
+
+	start := time.Now()
+	if code := run([]string{"-s", src.start(t), "-d", dstURL.URL, "-x", "src", "-y", "dst", "--request_timeout", "300ms"}); code != 0 {
+		t.Fatalf("exit code %d", code)
+	}
+	if d := time.Since(start); d > 900*time.Millisecond {
+		t.Errorf("took %s, the hanging request was not timed out", d)
+	}
+	checkDocs(t, values(dst.docs("dst")), 10, "")
 }

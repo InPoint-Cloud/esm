@@ -180,26 +180,18 @@ func (m *Migrator) targetIsTypeless() bool {
 	return m.TargetESAPI != nil && majorVersion(m.TargetESAPI.ClusterVersion()) >= 8
 }
 
+// ClusterReady returns true when the cluster is green, or yellow without --green. An unreachable cluster
+// is only waited for with --green.
 func (m *Migrator) ClusterReady(api ESAPI) (*ClusterHealth, bool) {
 	health := api.ClusterHealth()
 
-	if !m.Config.WaitForGreen {
+	switch health.Status {
+	case "green":
 		return health, true
-	}
-
-	if health.Status == "red" {
+	case "red":
 		return health, false
 	}
-
-	if !m.Config.WaitForGreen && health.Status == "yellow" {
-		return health, true
-	}
-
-	if health.Status == "green" {
-		return health, true
-	}
-
-	return health, false
+	return health, !m.Config.WaitForGreen
 }
 
 func (m *Migrator) NewBulkWorker(pb *pb.ProgressBar, wg *sync.WaitGroup) {

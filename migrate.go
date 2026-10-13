@@ -2,12 +2,15 @@ package main
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	log "github.com/InPoint-Cloud/esm/internal/log"
@@ -19,11 +22,28 @@ import (
 func (m *Migrator) runMigration() int {
 	c := m.Config
 
+	stopInterruptHandler := m.handleInterrupt()
+	defer stopInterruptHandler()
 	if !m.openFailedOutput() {
 		return 1
 	}
 	defer m.Stats.CloseFailedOutput()
 	defer m.restoreIndexSettings()
+
+	// opened once, so --truncate_output does not drop the documents of earlier --repeat_times rounds
+	if len(c.TargetEs) == 0 && len(c.DumpOutFile) > 0 {
+		f, err := openDumpOutput(c.DumpOutFile, c.TruncateOutFile)
+		if err != nil {
+			log.Error("can not open output file: ", err)
+			return 1
+		}
+		m.dumpFile = f
+		defer func() {
+			if m.dumpFile != nil {
+				m.dumpFile.Close()
+			}
+		}()
+	}
 
 	// output at least once
 	if c.RepeatOutputTimes < 1 {
@@ -40,6 +60,15 @@ func (m *Migrator) runMigration() int {
 		if err := m.migrateRound(showBar); err != nil {
 			log.Error(err)
 			return 1
+		}
+	}
+
+	if m.dumpFile != nil {
+		f := m.dumpFile
+		m.dumpFile = nil
+		if err := f.Close(); err != nil {
+			log.Error("can not write output file ", c.DumpOutFile, ": ", err)
+			atomic.StoreInt32(&m.Stats.WriteFailed, 1)
 		}
 	}
 
@@ -122,7 +151,7 @@ func (m *Migrator) migrateRound(showBar bool) error {
 	} else if len(c.DumpOutFile) > 0 {
 		outputBar.Prefix("Write")
 		wg.Add(1)
-		go m.NewFileDumpWorker(outputBar, &wg)
+		go m.NewFileDumpWorker(m.dumpFile, outputBar, &wg)
 	}
 	wg.Wait()
 	return nil
@@ -306,7 +335,9 @@ func (m *Migrator) copyIndexSetup(indexCount int, sourceIndexMappings *Indexes) 
 
 	sourceIndexRefreshSettings := map[string]interface{}{}
 	// registered before the indexes are created, so they are restored even if a later step fails
+	m.settingsLock.Lock()
 	m.settingsToRestore = append(m.settingsToRestore, sourceIndexRefreshSettings)
+	m.settingsLock.Unlock()
 
 	//if there is only one index and we specify the dest indexname
 	if c.SourceIndexNames != c.TargetIndexName && (len(c.TargetIndexName) > 0) && indexCount == 1 {
@@ -321,79 +352,86 @@ func (m *Migrator) copyIndexSetup(indexCount int, sourceIndexMappings *Indexes) 
 	}
 
 	for name, idx := range *sourceIndexSettings {
-		log.Debug("dealing with index,name:", name, ",settings:", idx)
-		tempIndexSettings := getEmptyIndexSettings()
+		// an interrupt waits until the index is created and its settings are registered
+		err := m.changeTargetSettings(func() error {
+			log.Debug("dealing with index,name:", name, ",settings:", idx)
+			tempIndexSettings := getEmptyIndexSettings()
 
-		targetIndexExist := false
-		//if target index settings is exist and we don't copy settings, we use target settings
-		if targetIndexSettings != nil {
-			//if target es have this index and we dont copy index settings
-			if val, ok := (*targetIndexSettings)[name]; ok {
-				targetIndexExist = true
-				tempIndexSettings = val.(map[string]interface{})
+			targetIndexExist := false
+			//if target index settings is exist and we don't copy settings, we use target settings
+			if targetIndexSettings != nil {
+				//if target es have this index and we dont copy index settings
+				if val, ok := (*targetIndexSettings)[name]; ok {
+					targetIndexExist = true
+					tempIndexSettings = val.(map[string]interface{})
+				}
+
+				if c.RecreateIndex {
+					m.TargetESAPI.DeleteIndex(name)
+					targetIndexExist = false
+				}
 			}
 
-			if c.RecreateIndex {
-				m.TargetESAPI.DeleteIndex(name)
-				targetIndexExist = false
+			//copy index settings
+			if c.CopyIndexSettings {
+				tempIndexSettings = ((*sourceIndexSettings)[name]).(map[string]interface{})
+				if c.CopyIndexMappings {
+					tempIndexSettings["mappings"] = (*sourceIndexMappings)[name].(map[string]interface{})["mappings"]
+				}
 			}
-		}
-
-		//copy index settings
-		if c.CopyIndexSettings {
-			tempIndexSettings = ((*sourceIndexSettings)[name]).(map[string]interface{})
-			if c.CopyIndexMappings {
-				tempIndexSettings["mappings"] = (*sourceIndexMappings)[name].(map[string]interface{})["mappings"]
+			//check map elements
+			if _, ok := tempIndexSettings["settings"]; !ok {
+				tempIndexSettings["settings"] = map[string]interface{}{}
 			}
-		}
-		//check map elements
-		if _, ok := tempIndexSettings["settings"]; !ok {
-			tempIndexSettings["settings"] = map[string]interface{}{}
-		}
-		if _, ok := tempIndexSettings["settings"].(map[string]interface{})["index"]; !ok {
-			tempIndexSettings["settings"].(map[string]interface{})["index"] = map[string]interface{}{}
-		}
+			if _, ok := tempIndexSettings["settings"].(map[string]interface{})["index"]; !ok {
+				tempIndexSettings["settings"].(map[string]interface{})["index"] = map[string]interface{}{}
+			}
 
-		//remember the settings changed during the migration, they are restored afterwards
-		sourceIndex := ((*sourceIndexSettings)[name].(map[string]interface{}))["settings"].(map[string]interface{})["index"].(map[string]interface{})
-		sourceIndexRefreshSettings[name] = map[string]interface{}{
-			"refresh_interval":   sourceIndex["refresh_interval"],
-			"number_of_replicas": sourceIndex["number_of_replicas"],
-		}
+			//remember the settings changed during the migration, they are restored afterwards
+			sourceIndex := ((*sourceIndexSettings)[name].(map[string]interface{}))["settings"].(map[string]interface{})["index"].(map[string]interface{})
+			sourceIndexRefreshSettings[name] = map[string]interface{}{
+				"refresh_interval":   sourceIndex["refresh_interval"],
+				"number_of_replicas": sourceIndex["number_of_replicas"],
+			}
 
-		//set refresh_interval
-		mapIndex := tempIndexSettings["settings"].(map[string]interface{})["index"].(map[string]interface{})
-		mapIndex["refresh_interval"] = -1
-		mapIndex["number_of_replicas"] = 0
-		//remove routing allocation
-		if _, ok := mapIndex["routing"]; ok && !c.RemainMappingRoutingAllocation {
-			delete(mapIndex, "routing")
-		}
+			//set refresh_interval
+			mapIndex := tempIndexSettings["settings"].(map[string]interface{})["index"].(map[string]interface{})
+			mapIndex["refresh_interval"] = -1
+			mapIndex["number_of_replicas"] = 0
+			//remove routing allocation
+			if _, ok := mapIndex["routing"]; ok && !c.RemainMappingRoutingAllocation {
+				delete(mapIndex, "routing")
+			}
 
-		if targetIndexExist {
-			//the number of shards of an existing index can not be changed
-			delete(mapIndex, "number_of_shards")
+			if targetIndexExist {
+				//the number of shards of an existing index can not be changed
+				delete(mapIndex, "number_of_shards")
+				if c.ShardsCount > 0 {
+					log.Warnf("index %s already exists, ignore --shards", name)
+				}
+				log.Debug("update index with settings,", name, tempIndexSettings)
+				if err := m.TargetESAPI.UpdateIndexSettings(name, tempIndexSettings); err != nil {
+					log.Error(err)
+					m.Stats.MarkSetupFailed()
+				}
+				return nil
+			}
+
+			//override shard settings, otherwise keep the shards of the source index
 			if c.ShardsCount > 0 {
-				log.Warnf("index %s already exists, ignore --shards", name)
+				mapIndex["number_of_shards"] = c.ShardsCount
+			} else if !c.CopyIndexSettings {
+				delete(mapIndex, "number_of_shards")
 			}
-			log.Debug("update index with settings,", name, tempIndexSettings)
-			if err := m.TargetESAPI.UpdateIndexSettings(name, tempIndexSettings); err != nil {
-				log.Error(err)
-				m.Stats.MarkSetupFailed()
+			log.Debug("create index with settings,", name, tempIndexSettings)
+			if err := m.TargetESAPI.CreateIndex(name, tempIndexSettings); err != nil {
+				//nothing to restore, the index does not exist
+				delete(sourceIndexRefreshSettings, name)
+				return err
 			}
-			continue
-		}
-
-		//override shard settings, otherwise keep the shards of the source index
-		if c.ShardsCount > 0 {
-			mapIndex["number_of_shards"] = c.ShardsCount
-		} else if !c.CopyIndexSettings {
-			delete(mapIndex, "number_of_shards")
-		}
-		log.Debug("create index with settings,", name, tempIndexSettings)
-		if err := m.TargetESAPI.CreateIndex(name, tempIndexSettings); err != nil {
-			//nothing to restore, the index does not exist
-			delete(sourceIndexRefreshSettings, name)
+			return nil
+		})
+		if err != nil {
 			return err
 		}
 	}
@@ -413,11 +451,62 @@ func (m *Migrator) copyIndexSetup(indexCount int, sourceIndexMappings *Indexes) 
 	return nil
 }
 
+// errInterrupted is returned by setup steps that would run after SIGINT or SIGTERM
+var errInterrupted = errors.New("interrupted")
+
+// changeTargetSettings runs fn, which changes the settings of a target index and registers them in
+// settingsToRestore, so an interrupt can not restore the settings while fn runs.
+func (m *Migrator) changeTargetSettings(fn func() error) error {
+	m.settingsLock.Lock()
+	defer m.settingsLock.Unlock()
+	if m.interrupted {
+		return errInterrupted
+	}
+	return fn()
+}
+
 func (m *Migrator) restoreIndexSettings() {
+	m.settingsLock.Lock()
+	defer m.settingsLock.Unlock()
+	m.restoreIndexSettingsLocked()
+}
+
+func (m *Migrator) restoreIndexSettingsLocked() {
 	for _, settings := range m.settingsToRestore {
 		m.recoveryIndexSettings(settings)
 	}
 	m.settingsToRestore = nil
+}
+
+// exitFunc ends esm after an interrupt, tests replace it
+var exitFunc = os.Exit
+
+// handleInterrupt restores the settings of the target indexes (refresh_interval, number_of_replicas)
+// on SIGINT or SIGTERM and exits with 130, a second signal kills esm right away.
+// The returned function stops the handler.
+func (m *Migrator) handleInterrupt() (stop func()) {
+	sigs := make(chan os.Signal, 1)
+	done := make(chan struct{})
+	signal.Notify(sigs, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		select {
+		case sig := <-sigs:
+			// back to the default handler for a second signal
+			signal.Stop(sigs)
+			log.Warnf("%s received, restoring the settings of the target indexes", sig)
+			m.settingsLock.Lock()
+			m.interrupted = true
+			m.restoreIndexSettingsLocked()
+			m.settingsLock.Unlock()
+			m.Stats.CloseFailedOutput()
+			exitFunc(130)
+		case <-done:
+		}
+	}()
+	return func() {
+		signal.Stop(sigs)
+		close(done)
+	}
 }
 
 // exitCode prints the summary and returns 1 if the migration failed or is incomplete
@@ -429,6 +518,10 @@ func (m *Migrator) exitCode() int {
 	if len(c.TargetEs) == 0 {
 		if atomic.LoadInt32(&m.Stats.ReadFailed) > 0 {
 			log.Error("reading from source failed, the output file is incomplete")
+			return 1
+		}
+		if atomic.LoadInt32(&m.Stats.WriteFailed) > 0 {
+			log.Error("writing the output file failed, it is incomplete")
 			return 1
 		}
 		return 0

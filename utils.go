@@ -2,24 +2,19 @@ package main
 
 import (
 	"encoding/json"
-	"fmt"
 	"strings"
 )
 
+// SubString returns the runes start to end of prim, end is capped at the length of prim
 func SubString(prim string, start int, end int) string {
-	if len(prim) == 0 {
-		fmt.Println("primitive str is empty")
+	runes := []rune(prim)
+	if end > len(runes) {
+		end = len(runes)
 	}
-	if l := len(prim); l < end {
-		end = l
+	if start > end {
+		start = end
 	}
-
-	value := prim
-	runes := []rune(value)
-
-	safeSubString := string(runes[start:end])
-
-	return safeSubString
+	return string(runes[start:end])
 }
 
 // splitFieldList parses a comma separated list of field names, ignoring empty entries

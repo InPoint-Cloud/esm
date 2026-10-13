@@ -23,10 +23,12 @@ import (
 	"fmt"
 	log "github.com/InPoint-Cloud/esm/internal/log"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
 	"sync"
+	"time"
 )
 
 // Get sends a GET request and returns the response with its body, the body is returned for any status code
@@ -51,6 +53,8 @@ func Get(url string, auth *Auth, proxy string) (*http.Response, string, []error)
 	if err != nil {
 		return nil, "", []error{err}
 	}
+	// read to the end and closed, so the connection can be reused
+	defer resp.Body.Close()
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return resp, "", []error{err}
@@ -85,22 +89,32 @@ func newDeleteRequest(client *http.Client, method, urlStr string) (*http.Request
 // insecureTLS disables the verification of TLS certificates, set by --insecure
 var insecureTLS bool
 
+// requestTimeout limits a whole request including reading the response, set by --request_timeout
+var requestTimeout time.Duration
+
 type clientKey struct {
 	proxy    string
 	insecure bool
+	timeout  time.Duration
 }
 
 // one client per proxy, source and target may use different proxies and are requested concurrently
 var clients sync.Map
 
 func getClient(proxy string) (*http.Client, error) {
-	key := clientKey{proxy: proxy, insecure: insecureTLS}
+	key := clientKey{proxy: proxy, insecure: insecureTLS, timeout: requestTimeout}
 	if c, ok := clients.Load(key); ok {
 		return c.(*http.Client), nil
 	}
+	dialer := &net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}
 	transport := &http.Transport{
-		DisableKeepAlives:  true,
-		DisableCompression: false,
+		DialContext:         dialer.DialContext,
+		TLSHandshakeTimeout: 30 * time.Second,
+		// connections are reused, scroll readers and bulk workers each keep one open
+		MaxIdleConns:        200,
+		MaxIdleConnsPerHost: 100,
+		IdleConnTimeout:     50 * time.Second,
+		DisableCompression:  false,
 		TLSClientConfig: &tls.Config{
 			InsecureSkipVerify: key.insecure,
 		},
@@ -112,7 +126,7 @@ func getClient(proxy string) (*http.Client, error) {
 		}
 		transport.Proxy = http.ProxyURL(proxyUrl)
 	}
-	c, _ := clients.LoadOrStore(key, &http.Client{Transport: transport})
+	c, _ := clients.LoadOrStore(key, &http.Client{Transport: transport, Timeout: key.timeout})
 	return c.(*http.Client), nil
 }
 
