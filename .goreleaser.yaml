@@ -7,6 +7,10 @@ project_name: esm
 before:
   hooks:
     - go mod download
+    # Embed Windows version info and manifest (winres/winres.json) as .syso
+    # files, which go build picks up for GOOS=windows. Unsigned binaries without
+    # this metadata are more likely to trip antivirus ML heuristics.
+    - go run github.com/tc-hib/go-winres@v0.3.3 make --arch amd64,arm64 --product-version {{ .Version }} --file-version {{ .Version }}
 
 builds:
   - id: esm
