@@ -2,7 +2,7 @@
 
 The section of a release is used as the description of its GitHub release.
 
-## Unreleased
+## v0.12.0
 
 ### Added
 - `--request_timeout` (default `10m`) limits a request to Elasticsearch, a hanging connection blocked the
@@ -12,6 +12,9 @@ The section of a release is used as the description of its GitHub release.
 - HTTP connections are kept alive and reused, every scroll and bulk request opened a new connection
   (and TLS handshake) before, which was slow and could run out of local ports on long migrations.
 - Without `--green`, a red cluster is now waited for (yellow is still okay), it was ignored before.
+- The Windows binaries carry version info (company, product, file version) and a manifest, an unsigned
+  exe without them was flagged by Defender as Trojan:Win32/Bearfoos.B!ml (a false positive).
+- Progress bars use `cheggaaa/pb/v3`, the unmaintained v1 module is no longer used.
 
 ### Fixed
 - Ctrl-C (SIGINT) or SIGTERM left the target indexes with `refresh_interval: -1` and `number_of_replicas: 0`,
