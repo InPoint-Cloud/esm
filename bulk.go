@@ -207,10 +207,32 @@ func (m *Migrator) flushBulk(api ESAPI, items [][]byte) int {
 		return 0
 	}
 	atomic.AddInt64(&m.Stats.Sent, int64(len(items)))
-	succeeded := 0
-	pending := items
+	succeeded := m.sendBulk(api, items, 0)
+	atomic.AddInt64(&m.Stats.Indexed, int64(succeeded))
+	return succeeded
+}
 
-	for attempt := 0; len(pending) > 0; attempt++ {
+// isRequestTooLarge returns true when the target rejects a whole bulk request because of its size:
+// 413 when it is over http.max_content_length, 429 when it trips a circuit breaker or fills the write queue
+func isRequestTooLarge(err error) bool {
+	var statusErr *HTTPStatusError
+	return errors.As(err, &statusErr) && (statusErr.Code == 413 || statusErr.Code == 429)
+}
+
+func bulkBytes(items [][]byte) int {
+	size := 0
+	for _, item := range items {
+		size += len(item)
+	}
+	return size
+}
+
+// sendBulk sends pending as one bulk request, starting at retry number attempt. A request rejected
+// with 413 or 429 is split in two halves that are sent one after the other, they keep the retries left.
+// It returns the number of successfully indexed items.
+func (m *Migrator) sendBulk(api ESAPI, pending [][]byte, attempt int) int {
+	succeeded := 0
+	for ; len(pending) > 0; attempt++ {
 		canRetry := attempt < m.Config.MaxRetries
 		buf := bytes.Buffer{}
 		for _, item := range pending {
@@ -219,6 +241,17 @@ func (m *Migrator) flushBulk(api ESAPI, items [][]byte) int {
 
 		response, err := api.Bulk(&buf)
 		if err != nil {
+			if len(pending) > 1 && isRequestTooLarge(err) {
+				half := len(pending) / 2
+				log.Warnf("bulk request of %d documents (%s) rejected, split it in two: %s", len(pending),
+					formatBytes(int64(bulkBytes(pending))), SubString(err.Error(), 0, 300))
+				var statusErr *HTTPStatusError
+				if errors.As(err, &statusErr) && statusErr.Code == 429 {
+					// give the target a moment to free memory
+					time.Sleep(backoff(1))
+				}
+				return succeeded + m.sendBulk(api, pending[:half], attempt) + m.sendBulk(api, pending[half:], attempt)
+			}
 			if canRetry && isRetryable(err) {
 				wait := backoff(attempt + 1)
 				log.Warnf("bulk request failed, retry %d/%d in %s: %s", attempt+1, m.Config.MaxRetries, wait,
@@ -260,7 +293,5 @@ func (m *Migrator) flushBulk(api ESAPI, items [][]byte) int {
 			time.Sleep(wait)
 		}
 	}
-
-	atomic.AddInt64(&m.Stats.Indexed, int64(succeeded))
 	return succeeded
 }

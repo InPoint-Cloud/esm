@@ -312,8 +312,11 @@ WORKER_DONE:
 	wg.Done()
 }
 
+// bulkRecords indexes or deletes the docs of diffDocMaps, in bulk requests of up to --bulk_size
 func (m *Migrator) bulkRecords(bulkOp BulkOperation, dstEsApi ESAPI, targetIndex string, targetType string, diffDocMaps map[string]json.RawMessage) error {
 	var items [][]byte
+	itemsSize := 0
+	maxSize := m.Config.BulkSizeInMB * 1024 * 1024
 	docBuf := bytes.Buffer{}
 	docEnc := json.NewEncoder(&docBuf)
 
@@ -353,7 +356,12 @@ func (m *Migrator) bulkRecords(bulkOp BulkOperation, dstEsApi ESAPI, targetIndex
 		item := make([]byte, docBuf.Len())
 		copy(item, docBuf.Bytes())
 		docBuf.Reset()
+		if len(items) > 0 && itemsSize+len(item) > maxSize {
+			m.flushBulk(dstEsApi, items)
+			items, itemsSize = nil, 0
+		}
 		items = append(items, item)
+		itemsSize += len(item)
 	}
 
 	m.flushBulk(dstEsApi, items)

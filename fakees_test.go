@@ -26,11 +26,15 @@ type fakeES struct {
 	rejectBulk  int    // if set, every bulk item fails with this status code
 	bulkStatus  []int  // status codes of the next whole bulk requests, ie: 503 for an overloaded cluster
 	itemStatus  []int  // status codes of the next bulk items, ie: 429 for rejected documents
-	auth        string // required Authorization header
-	health      string // cluster health status of the next healthChecks requests, then green
-	healthCheck int
-	sorts       []string // the sort of every new scroll, "" without one
-	dataNodes   int      // number_of_data_nodes of the cluster health
+	// if set, bulk requests larger than this many bytes fail with 429 like a tripped circuit breaker
+	maxBulkBytes int
+	largestBulk  int    // size of the largest bulk request received
+	bulkRequests int    // number of bulk requests received
+	auth         string // required Authorization header
+	health       string // cluster health status of the next healthChecks requests, then green
+	healthCheck  int
+	sorts        []string // the sort of every new scroll, "" without one
+	dataNodes    int      // number_of_data_nodes of the cluster health
 	// persistent cluster settings, ie: indices.id_field_data.enabled
 	clusterSettings map[string]interface{}
 	// http.max_content_length set on the nodes, "" for the default
@@ -206,6 +210,13 @@ func (f *fakeES) handle(w http.ResponseWriter, r *http.Request) {
 		}
 		reply(200, map[string]interface{}{"nodes": map[string]interface{}{"node1": map[string]interface{}{"settings": settings}}})
 	case r.URL.Path == "/_bulk":
+		f.bulkRequests++
+		f.largestBulk = max(f.largestBulk, len(body))
+		if f.maxBulkBytes > 0 && len(body) > f.maxBulkBytes {
+			reply(429, map[string]interface{}{"error": map[string]string{"type": "circuit_breaking_exception",
+				"reason": "[parent] Data too large"}, "status": 429})
+			return
+		}
 		if len(f.bulkStatus) > 0 {
 			status := f.bulkStatus[0]
 			f.bulkStatus = f.bulkStatus[1:]
