@@ -115,6 +115,10 @@ func (m *Migrator) runSync() int {
 	if !m.connect() {
 		return 1
 	}
+	if !m.openFailedOutput() {
+		return 1
+	}
+	defer m.Stats.CloseFailedOutput()
 	m.SyncBetweenIndex(m.SourceESAPI, m.TargetESAPI, c)
 	m.Stats.PrintSummary()
 	if m.Stats.HasFailures() {
