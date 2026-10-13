@@ -14,7 +14,7 @@ import (
 	"time"
 
 	log "github.com/InPoint-Cloud/esm/internal/log"
-	"github.com/cheggaaa/pb"
+	"github.com/cheggaaa/pb/v3"
 	"github.com/mattn/go-isatty"
 )
 
@@ -95,8 +95,8 @@ func (m *Migrator) migrateRound(showBar bool) error {
 
 	// enough of a buffer to hold all the search results across all workers
 	m.DocChan = make(chan Document, c.BufferCount)
-	fetchBar := pb.New(1).Prefix("Scroll")
-	outputBar := pb.New(1).Prefix("Output ")
+	fetchBar := newBar(1, "Scroll")
+	outputBar := newBar(1, "Output")
 	wg := sync.WaitGroup{}
 
 	// start reading, the docs are buffered in DocChan while the target is prepared
@@ -110,8 +110,8 @@ func (m *Migrator) migrateRound(showBar bool) error {
 			return err
 		}
 		log.Trace("file line,", lineCount)
-		fetchBar = pb.New(lineCount).Prefix("Read")
-		outputBar = pb.New(lineCount).Prefix("Output ")
+		fetchBar = newBar(lineCount, "Read")
+		outputBar = newBar(lineCount, "Output")
 		wg.Add(1)
 		go m.NewFileReadWorker(fetchBar, &wg)
 	}
@@ -143,13 +143,13 @@ func (m *Migrator) migrateRound(showBar bool) error {
 	log.Info("start data migration..")
 	if len(c.TargetEs) > 0 {
 		log.Debug("start es bulk workers")
-		outputBar.Prefix("Bulk")
+		outputBar.Set("prefix", "Bulk")
 		wg.Add(c.Workers)
 		for i := 0; i < c.Workers; i++ {
 			go m.NewBulkWorker(outputBar, &wg)
 		}
 	} else if len(c.DumpOutFile) > 0 {
-		outputBar.Prefix("Write")
+		outputBar.Set("prefix", "Write")
 		wg.Add(1)
 		go m.NewFileDumpWorker(m.dumpFile, outputBar, &wg)
 	}
@@ -217,10 +217,15 @@ func (m *Migrator) startScrollReaders(wg *sync.WaitGroup, fetchBar, outputBar *p
 	}()
 
 	if totalSize > 0 {
-		fetchBar.Total = int64(totalSize)
-		outputBar.Total = int64(totalSize)
+		fetchBar.SetTotal(int64(totalSize))
+		outputBar.SetTotal(int64(totalSize))
 	}
 	return nil
+}
+
+// newBar returns a progress bar with a label in front of the counters
+func newBar(total int, prefix string) *pb.ProgressBar {
+	return pb.Full.New(total).Set("prefix", prefix)
 }
 
 func countLines(path string) (int, error) {

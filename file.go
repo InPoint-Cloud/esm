@@ -20,7 +20,7 @@ import (
 	"bufio"
 	"encoding/json"
 	log "github.com/InPoint-Cloud/esm/internal/log"
-	"github.com/cheggaaa/pb"
+	"github.com/cheggaaa/pb/v3"
 	"io"
 	"os"
 	"strings"

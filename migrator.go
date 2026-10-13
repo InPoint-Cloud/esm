@@ -21,7 +21,7 @@ import (
 	"encoding/json"
 	"fmt"
 	log "github.com/InPoint-Cloud/esm/internal/log"
-	"github.com/cheggaaa/pb"
+	"github.com/cheggaaa/pb/v3"
 	//"github.com/google/go-cmp/cmp"
 	"io"
 	"strings"
@@ -395,7 +395,7 @@ func (m *Migrator) SyncBetweenIndex(srcEsApi ESAPI, dstEsApi ESAPI, cfg *Config)
 	deleteCount := 0
 
 	//TODO: progress for the parts [ scroll src/dst + index ] => delete
-	srcBar := pb.New(1).Prefix("Progress")
+	srcBar := newBar(1, "Progress")
 	//srcBar := pb.New(1).Prefix("Source")
 	//dstBar := pb.New(100).Prefix("Dest")
 	//pool, err := pb.StartPool(srcBar, dstBar)
@@ -410,7 +410,7 @@ func (m *Migrator) SyncBetweenIndex(srcEsApi ESAPI, dstEsApi ESAPI, cfg *Config)
 				return
 			}
 			log.Infof("src total count=%d", srcScroll.GetHitsTotal())
-			srcBar.Total = int64(srcScroll.GetHitsTotal())
+			srcBar.SetTotal(int64(srcScroll.GetHitsTotal()))
 			srcBar.Start()
 		} else if needScrollSrc {
 			start := time.Now()
@@ -642,7 +642,8 @@ func (m *Migrator) SyncBetweenIndex(srcEsApi ESAPI, dstEsApi ESAPI, cfg *Config)
 	srcEsApi.DeleteScroll(srcScroll.GetScrollId())
 	dstEsApi.DeleteScroll(dstScroll.GetScrollId())
 
-	srcBar.FinishPrint("Source End")
+	srcBar.Finish()
+	fmt.Println("Source End")
 	//dstBar.FinishPrint("Dest End")
 	//pool.Stop()
 
