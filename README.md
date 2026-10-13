@@ -357,8 +357,9 @@ Application Options:
                                    indexname, original indexname will be used
                                    if not specified
   -u, --type_override=             override type name
-      --green                      wait for both hosts cluster status to be
-                                   green before dump. otherwise yellow is okay
+      --green                      wait for both clusters to be green before
+                                   migrating, otherwise yellow is okay (a red
+                                   cluster is always waited for)
   -v, --log=                       setting log
                                    level,options:trace,debug,info,warn,error
                                    (default: INFO)
@@ -366,6 +367,10 @@ Application Options:
       --insecure                   skip verifying the TLS certificates of
                                    source and target, ie: for self-signed
                                    certificates
+      --request_timeout=           timeout of a request to elasticsearch
+                                   including the response, ie: 30s, 10m, 0
+                                   disables it. A timed out request is retried
+                                   like a network error (default: 10m)
       --pprof=                     start a pprof server, on 127.0.0.1:6060 or
                                    the given address
   -o, --output_file=               output documents of source index into local

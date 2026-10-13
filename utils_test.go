@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
@@ -116,5 +117,29 @@ func TestGetSendsAuth(t *testing.T) {
 	Get(srv.URL, &Auth{ApiKey: "a2V5"}, "")
 	if got != "ApiKey a2V5" {
 		t.Errorf("api key header = %q", got)
+	}
+}
+
+func TestSubString(t *testing.T) {
+	tests := []struct {
+		in         string
+		start, end int
+		want       string
+	}{
+		{"hello", 0, 3, "hel"},
+		{"hello", 0, 500, "hello"},
+		{"", 0, 500, ""},
+		{"äöü", 1, 2, "ö"},
+		{"hello", 7, 9, ""},
+	}
+	for _, tt := range tests {
+		if got := SubString(tt.in, tt.start, tt.end); got != tt.want {
+			t.Errorf("SubString(%q, %d, %d) = %q, want %q", tt.in, tt.start, tt.end, got, tt.want)
+		}
+	}
+	// longer than end in bytes, shorter in runes
+	long := strings.Repeat("ä", 400)
+	if got := SubString(long, 0, 500); got != long {
+		t.Errorf("SubString of %d runes = %d runes", 400, len([]rune(got)))
 	}
 }

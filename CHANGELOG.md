@@ -4,7 +4,25 @@ The section of a release is used as the description of its GitHub release.
 
 ## Unreleased
 
+### Added
+- `--request_timeout` (default `10m`) limits a request to Elasticsearch, a hanging connection blocked the
+  migration forever. A timed out request is retried like a network error.
+
+### Changed
+- HTTP connections are kept alive and reused, every scroll and bulk request opened a new connection
+  (and TLS handshake) before, which was slow and could run out of local ports on long migrations.
+- Without `--green`, a red cluster is now waited for (yellow is still okay), it was ignored before.
+
 ### Fixed
+- Ctrl-C (SIGINT) or SIGTERM left the target indexes with `refresh_interval: -1` and `number_of_replicas: 0`,
+  the settings are now restored before esm exits with 130. A second Ctrl-C exits right away.
+- esm crashed when it shortened a long error message with non-ASCII characters, ie: a bulk error quoting
+  a German field value.
+- `-o` to a file that could not be opened hung forever, write errors (ie: a full disk) were ignored and
+  esm exited with 0. Both now exit with 1.
+- `-o` with `--truncate_output` and `--repeat_times` kept only the documents of the last round.
+- `--sync` with `--sliced_scroll_size` above 1 compared only the first slice, the others were not synced
+  and with `--enable_delete` their target documents could be deleted. Sync now ignores the option.
 - `--failed_output` was ignored with `--sync`: documents that still failed after all retries (ie: 429)
   were counted as failed but no file was written.
 - `--sync` ignored `-b`/`--bulk_size` and sent all new or changed documents of a scroll page (or all

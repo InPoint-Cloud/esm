@@ -38,6 +38,7 @@ func run(args []string) int {
 	defer closeLog()
 
 	insecureTLS = c.Insecure
+	requestTimeout = c.RequestTimeout
 
 	if c.Pprof != "" {
 		go func() {
@@ -111,6 +112,11 @@ func (m *Migrator) runSync() int {
 	// sync walks source and target in the same order to compare them
 	if c.SortField == "" {
 		c.SortField = "_id"
+	}
+	// sync reads only one slice, the others would be missing and their target documents deleted
+	if c.ScrollSliceSize > 1 {
+		log.Warnf("--sliced_scroll_size is not supported with --sync, ignoring it")
+		c.ScrollSliceSize = 1
 	}
 	if !m.connect() {
 		return 1

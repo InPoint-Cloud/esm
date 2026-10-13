@@ -27,6 +27,8 @@ type MigrationStats struct {
 	ReadFailed int32
 	// set when copying settings or mappings failed
 	SetupFailed int32
+	// set when the output file (-o) could not be written
+	WriteFailed int32
 
 	lock         sync.Mutex
 	loggedErrors int
