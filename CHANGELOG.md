@@ -7,6 +7,12 @@ The section of a release is used as the description of its GitHub release.
 ### Fixed
 - `--failed_output` was ignored with `--sync`: documents that still failed after all retries (ie: 429)
   were counted as failed but no file was written.
+- `--sync` ignored `-b`/`--bulk_size` and sent all new or changed documents of a scroll page (or all
+  documents left over at the end) in a single bulk request, which the target often rejected with 429.
+  Sync bulk requests are now split at `--bulk_size` like a normal migration.
+- A bulk request the target rejects as a whole with 429 (circuit breaker, ie: "Data too large") or 413
+  is now split in two halves that are sent one after the other, instead of resending the same large
+  request until the retries run out.
 
 ## v0.11.2
 

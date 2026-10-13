@@ -397,3 +397,71 @@ func TestInputFileFormatting(t *testing.T) {
 		t.Errorf("countLines = %d, %v, want 3", n, err)
 	}
 }
+
+func TestBulkTooLarge(t *testing.T) {
+	fastRetries(t)
+
+	t.Run("rejected request is split", func(t *testing.T) {
+		src := newFakeES("7.10.2")
+		src.addIndex("src", 20)
+		dst := newFakeES("7.10.2")
+		dst.maxBulkBytes = 300
+		if code := run([]string{"-s", src.start(t), "-d", dst.start(t), "-x", "src", "-y", "dst"}); code != 0 {
+			t.Fatalf("exit code %d", code)
+		}
+		checkDocs(t, values(dst.docs("dst")), 20, "")
+	})
+
+	t.Run("sync splits rejected request", func(t *testing.T) {
+		src := newFakeES("7.10.2")
+		src.addIndex("idx", 30)
+		dst := newFakeES("7.10.2")
+		dst.addIndex("idx", 0)
+		dst.maxBulkBytes = 300
+		if code := run([]string{"-s", src.start(t), "-d", dst.start(t), "-x", "idx", "--sync", "-c", "50"}); code != 0 {
+			t.Fatalf("exit code %d", code)
+		}
+		if got := len(dst.docs("idx")); got != 30 {
+			t.Errorf("target has %d documents, want 30", got)
+		}
+	})
+
+	t.Run("sync uses bulk size", func(t *testing.T) {
+		src := newFakeES("7.10.2")
+		src.addIndex("idx", 0)
+		big := strings.Repeat("x", 100*1024)
+		src.mu.Lock()
+		for i := 0; i < 30; i++ {
+			src.putDoc("idx", fmt.Sprintf("%04d", i), "_doc", fmt.Sprintf(`{"n":%d,"text":"%s"}`, i, big))
+		}
+		src.mu.Unlock()
+		dst := newFakeES("7.10.2")
+		dst.addIndex("idx", 0)
+		if code := run([]string{"-s", src.start(t), "-d", dst.start(t), "-x", "idx", "--sync", "-c", "50", "-b", "1"}); code != 0 {
+			t.Fatalf("exit code %d", code)
+		}
+		if got := len(dst.docs("idx")); got != 30 {
+			t.Errorf("target has %d documents, want 30", got)
+		}
+		if dst.largestBulk > 1024*1024 {
+			t.Errorf("largest bulk request has %d bytes, want at most 1mb", dst.largestBulk)
+		}
+		if dst.bulkRequests < 3 {
+			t.Errorf("%d bulk requests, want at least 3", dst.bulkRequests)
+		}
+	})
+
+	t.Run("single document too large", func(t *testing.T) {
+		src := newFakeES("7.10.2")
+		src.addIndex("src", 20)
+		dst := newFakeES("7.10.2")
+		dst.maxBulkBytes = 10
+		failed := filepath.Join(t.TempDir(), "failed.json")
+		if code := run([]string{"-s", src.start(t), "-d", dst.start(t), "-x", "src", "-y", "dst", "--max_retries=1", "--failed_output", failed}); code != 1 {
+			t.Fatalf("exit code %d, want 1", code)
+		}
+		if lines := readLines(t, failed); len(lines) != 20 {
+			t.Errorf("failed output has %d lines, want 20", len(lines))
+		}
+	})
+}
