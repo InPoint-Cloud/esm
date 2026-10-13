@@ -19,7 +19,7 @@ package main
 import (
 	"encoding/json"
 	log "github.com/InPoint-Cloud/esm/internal/log"
-	"github.com/cheggaaa/pb"
+	"github.com/cheggaaa/pb/v3"
 )
 
 type ScrollAPI interface {
