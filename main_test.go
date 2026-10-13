@@ -335,6 +335,20 @@ func TestSync(t *testing.T) {
 		}
 	})
 
+	t.Run("rejected documents are saved", func(t *testing.T) {
+		src, dst := setup("7.10.2")
+		// every bulk request of the sync fails with 429, retries included
+		dst.bulkStatus = []int{429, 429, 429, 429, 429, 429}
+		failed := filepath.Join(t.TempDir(), "failed.json")
+		if code := run(args(src, dst, "--max_retries=2", "--failed_output", failed)); code != 1 {
+			t.Fatalf("exit code %d, want 1", code)
+		}
+		// the missing doc 0003 and the changed doc 0007
+		if lines := readLines(t, failed); len(lines) != 2 {
+			t.Errorf("failed output has %d lines, want 2", len(lines))
+		}
+	})
+
 	t.Run("dry", func(t *testing.T) {
 		src, dst := setup("7.10.2")
 		before := dst.docs("idx")

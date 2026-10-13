@@ -19,13 +19,10 @@ import (
 func (m *Migrator) runMigration() int {
 	c := m.Config
 
-	if len(c.FailedOutputFile) > 0 {
-		if err := m.Stats.OpenFailedOutput(c.FailedOutputFile); err != nil {
-			log.Error("can not open failed output file: ", err)
-			return 1
-		}
-		defer m.Stats.CloseFailedOutput()
+	if !m.openFailedOutput() {
+		return 1
 	}
+	defer m.Stats.CloseFailedOutput()
 	defer m.restoreIndexSettings()
 
 	// output at least once
@@ -49,6 +46,18 @@ func (m *Migrator) runMigration() int {
 	log.Info("data migration finished.")
 	m.restoreIndexSettings()
 	return m.exitCode()
+}
+
+// openFailedOutput opens the --failed_output file if one is set, it returns false if that fails
+func (m *Migrator) openFailedOutput() bool {
+	if len(m.Config.FailedOutputFile) == 0 {
+		return true
+	}
+	if err := m.Stats.OpenFailedOutput(m.Config.FailedOutputFile); err != nil {
+		log.Error("can not open failed output file: ", err)
+		return false
+	}
+	return true
 }
 
 // migrateRound reads all documents once and writes them to the output

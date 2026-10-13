@@ -2,6 +2,12 @@
 
 The section of a release is used as the description of its GitHub release.
 
+## Unreleased
+
+### Fixed
+- `--failed_output` was ignored with `--sync`: documents that still failed after all retries (ie: 429)
+  were counted as failed but no file was written.
+
 ## v0.11.2
 
 ### Fixed
