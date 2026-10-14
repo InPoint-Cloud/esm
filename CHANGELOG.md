@@ -2,7 +2,7 @@
 
 The section of a release is used as the description of its GitHub release.
 
-## Unreleased
+## v0.12.2
 
 ### Changed
 - The wait before a migration checks the health of the migrated indexes (`_cluster/health/<index>`) instead
