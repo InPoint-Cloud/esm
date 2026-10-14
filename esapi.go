@@ -19,7 +19,7 @@ package main
 import "bytes"
 
 type ESAPI interface {
-	ClusterHealth() *ClusterHealth
+	ClusterHealth(index string) *ClusterHealth
 	ClusterVersion() *ClusterVersion
 	Bulk(data *bytes.Buffer) (*BulkResponse, error)
 	Count(indexName string, query string) (int, error)

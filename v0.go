@@ -35,9 +35,14 @@ type ESAPIV0 struct {
 	Version   *ClusterVersion
 }
 
-func (s *ESAPIV0) ClusterHealth() *ClusterHealth {
+// ClusterHealth returns the health of the whole cluster, or of one index (pattern or alias) if a name is given.
+// An index that does not exist is "missing", elasticsearch waits up to the timeout for it and then times out.
+func (s *ESAPIV0) ClusterHealth(index string) *ClusterHealth {
 
 	url := fmt.Sprintf("%s/_cluster/health", s.Host)
+	if index != "" {
+		url = fmt.Sprintf("%s/_cluster/health/%s?timeout=1s", s.Host, index)
+	}
 	r, body, errs := Get(url, s.Auth, s.HttpProxy)
 
 	if r != nil && r.Body != nil {
@@ -52,12 +57,19 @@ func (s *ESAPIV0) ClusterHealth() *ClusterHealth {
 	log.Debug(url)
 	log.Debug(body)
 
+	if index != "" && r.StatusCode == 404 {
+		return &ClusterHealth{Name: s.Host, Status: "missing"}
+	}
+
 	health := &ClusterHealth{}
 	err := json.Unmarshal([]byte(body), health)
 
 	if err != nil {
 		log.Error(body)
 		return &ClusterHealth{Name: s.Host, Status: "unreachable"}
+	}
+	if index != "" && health.TimedOut {
+		health.Status = "missing"
 	}
 	return health
 }

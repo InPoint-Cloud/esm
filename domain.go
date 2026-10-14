@@ -97,6 +97,10 @@ type ClusterVersion struct {
 type ClusterHealth struct {
 	Name   string `json:"cluster_name,omitempty"`
 	Status string `json:"status,omitempty"`
+	// set when waiting for an index that does not exist timed out
+	TimedOut bool `json:"timed_out,omitempty"`
+	// the index (pattern) the health is for, "" for the whole cluster
+	Index string `json:"-"`
 }
 
 // {"took":23,"errors":true,"items":[{"create":{"_index":"mybank3","_type":"my_doc2","_id":"AWz8rlgUkzP-cujdA_Fv","status":409,"error":{"type":"version_conflict_engine_exception","reason":"[AWz8rlgUkzP-cujdA_Fv]: version conflict, document already exists (current version [1])","index_uuid":"w9JZbJkfSEWBI-uluWorgw","shard":"0","index":"mybank3"}}},{"create":{"_index":"mybank3","_type":"my_doc4","_id":"AWz8rpF2kzP-cujdA_Fx","status":400,"error":{"type":"illegal_argument_exception","reason":"Rejecting mapping update to [mybank3] as the final mapping would have more than 1 type: [my_doc2, my_doc4]"}}},{"create":{"_index":"mybank3","_type":"my_doc1","_id":"AWz8rjpJkzP-cujdA_Fu","status":400,"error":{"type":"illegal_argument_exception","reason":"Rejecting mapping update to [mybank3] as the final mapping would have more than 1 type: [my_doc2, my_doc1]"}}},{"create":{"_index":"mybank3","_type":"my_doc3","_id":"AWz8rnbckzP-cujdA_Fw","status":400,"error":{"type":"illegal_argument_exception","reason":"Rejecting mapping update to [mybank3] as the final mapping would have more than 1 type: [my_doc2, my_doc3]"}}},{"create":{"_index":"mybank3","_type":"my_doc5","_id":"AWz8rrsEkzP-cujdA_Fy","status":400,"error":{"type":"illegal_argument_exception","reason":"Rejecting mapping update to [mybank3] as the final mapping would have more than 1 type: [my_doc2, my_doc5]"}}},{"create":{"_index":"mybank3","_type":"doc","_id":"3","status":400,"error":{"type":"illegal_argument_exception","reason":"Rejecting mapping update to [mybank3] as the final mapping would have more than 1 type: [my_doc2, doc]"}}}]}
@@ -158,7 +162,7 @@ type Config struct {
 	SourceIndexNames  string        `short:"x" long:"src_indexes" description:"indexes name to copy,support regex and comma separated list" default:"_all"`
 	TargetIndexName   string        `short:"y" long:"dest_index" description:"indexes name to save, allow only one indexname, original indexname will be used if not specified" default:""`
 	OverrideTypeName  string        `short:"u" long:"type_override" description:"override type name" default:""`
-	WaitForGreen      bool          `long:"green"             description:"wait for both clusters to be green before migrating, otherwise yellow is okay (a red cluster is always waited for)"`
+	WaitForGreen      bool          `long:"green"             description:"wait for the migrated indexes of both clusters to be green before migrating, otherwise yellow is okay (a red index is always waited for)"`
 	LogLevel          string        `short:"v" long:"log"            description:"setting log level,options:trace,debug,info,warn,error"  default:"INFO"`
 	LogFile           string        `long:"log_file" description:"also write the log to this file"`
 	Insecure          bool          `long:"insecure" description:"skip verifying the TLS certificates of source and target, ie: for self-signed certificates"`

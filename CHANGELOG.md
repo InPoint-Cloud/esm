@@ -2,6 +2,14 @@
 
 The section of a release is used as the description of its GitHub release.
 
+## Unreleased
+
+### Changed
+- The wait before a migration checks the health of the migrated indexes (`_cluster/health/<index>`) instead
+  of the whole cluster, so a red index that is not migrated no longer blocks the migration forever. Without
+  `--dest_index` the source index names are checked on the target, a target index that does not exist yet is
+  skipped. Without index names (a dump file without `--dest_index`) the whole cluster is still checked.
+
 ## v0.12.1
 
 ### Changed

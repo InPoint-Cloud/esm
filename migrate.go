@@ -297,24 +297,34 @@ func (m *Migrator) prepareTarget() error {
 // clusterWaitInterval is the time between two cluster health checks, tests make it shorter
 var clusterWaitInterval = 3 * time.Second
 
-// waitForClusters blocks until source and target are ready, see ClusterReady
+// waitForClusters blocks until the migrated indexes of source and target are ready, see ClusterReady.
+// Without --dest_index the documents keep their index names, so the source names are checked on the target.
 func (m *Migrator) waitForClusters() {
 	c := m.Config
+	targetIndexes := c.TargetIndexName
+	if targetIndexes == "" && len(c.SourceEs) > 0 {
+		targetIndexes = c.SourceIndexNames
+	}
 	clusters := []struct {
-		url string
-		api ESAPI
-	}{{c.SourceEs, m.SourceESAPI}, {c.TargetEs, m.TargetESAPI}}
+		url     string
+		api     ESAPI
+		indexes string
+	}{{c.SourceEs, m.SourceESAPI, c.SourceIndexNames}, {c.TargetEs, m.TargetESAPI, targetIndexes}}
 
 	for _, cluster := range clusters {
 		if len(cluster.url) == 0 {
 			continue
 		}
 		for {
-			status, ready := m.ClusterReady(cluster.api)
+			status, ready := m.ClusterReady(cluster.api, cluster.indexes)
 			if ready {
 				break
 			}
-			log.Infof("%s at %s is %s, delaying migration ", status.Name, cluster.url, status.Status)
+			if status.Index != "" {
+				log.Infof("index %s of %s at %s is %s, delaying migration ", status.Index, status.Name, cluster.url, status.Status)
+			} else {
+				log.Infof("%s at %s is %s, delaying migration ", status.Name, cluster.url, status.Status)
+			}
 			time.Sleep(clusterWaitInterval)
 		}
 	}
