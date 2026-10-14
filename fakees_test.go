@@ -39,6 +39,8 @@ type fakeES struct {
 	clusterSettings map[string]interface{}
 	// http.max_content_length set on the nodes, "" for the default
 	maxContentLength string
+	// if set, bulk requests larger than this many bytes fail with 429 like the indexing pressure limit
+	indexingPressureLimit int
 
 	mu       sync.Mutex
 	indices  map[string]*fakeIndex
@@ -215,6 +217,13 @@ func (f *fakeES) handle(w http.ResponseWriter, r *http.Request) {
 		if f.maxBulkBytes > 0 && len(body) > f.maxBulkBytes {
 			reply(429, map[string]interface{}{"error": map[string]string{"type": "circuit_breaking_exception",
 				"reason": "[parent] Data too large"}, "status": 429})
+			return
+		}
+		if f.indexingPressureLimit > 0 && len(body) > f.indexingPressureLimit {
+			reply(429, map[string]interface{}{"error": map[string]string{"type": "es_rejected_execution_exception",
+				"reason": fmt.Sprintf("rejected execution of coordinating operation [coordinating_and_primary_bytes=0, "+
+					"replica_bytes=0, all_bytes=0, coordinating_operation_bytes=%d, max_coordinating_and_primary_bytes=%d]",
+					len(body), f.indexingPressureLimit)}, "status": 429})
 			return
 		}
 		if len(f.bulkStatus) > 0 {

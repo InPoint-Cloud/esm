@@ -10,6 +10,9 @@ import (
 	"fmt"
 	log "github.com/InPoint-Cloud/esm/internal/log"
 	"os"
+	"regexp"
+	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -17,6 +20,9 @@ import (
 
 // number of bulk item errors that are logged, the rest are only counted
 const maxLoggedBulkErrors = 10
+
+// failed documents larger than this are logged with their size
+const largeDocBytes = 1 << 20
 
 // MigrationStats counts the documents of a run, shared by all bulk workers
 type MigrationStats struct {
@@ -229,6 +235,102 @@ func bulkBytes(items [][]byte) int {
 	return size
 }
 
+// rejection tells why the target refused a request or a bulk item
+type rejection struct {
+	// sending the same documents again fails the same way, ie: a document larger than a limit
+	permanent bool
+	// the elasticsearch setting to change, "" if unknown
+	hint string
+}
+
+// the byte counts in the reason of an indexing pressure rejection, ie: "rejected execution of primary operation
+// [coordinating_and_primary_bytes=51748375, replica_bytes=0, all_bytes=51748375, primary_operation_bytes=206991772,
+// max_primary_bytes=214748364]", older versions name the limit max_coordinating_and_primary_bytes
+var pressureBytesRe = regexp.MustCompile(`(\w+)_bytes=(\d+)`)
+
+// pressureIsPermanent returns true when an indexing pressure rejection repeats if only the rejected documents of
+// size bytes are sent again, ie: a 50mb document whose primary operation alone takes 200mb of a 214mb limit
+func pressureIsPermanent(reason string, size int) bool {
+	counts := map[string]int64{}
+	for _, m := range pressureBytesRe.FindAllStringSubmatch(reason, -1) {
+		counts[m[1]], _ = strconv.ParseInt(m[2], 10, 64)
+	}
+	limits := map[string][]string{
+		"coordinating": {"max_coordinating", "max_coordinating_and_primary"},
+		"primary":      {"max_primary", "max_coordinating_and_primary"},
+		"replica":      {"max_replica"},
+	}
+	for op, names := range limits {
+		bytes, ok := counts[op+"_operation"]
+		if !ok {
+			continue
+		}
+		limit := int64(0)
+		for _, name := range names {
+			if l, ok := counts[name]; ok {
+				limit = l
+				break
+			}
+		}
+		if limit == 0 {
+			return false
+		}
+		if op == "primary" {
+			// the coordinating bytes of the same request are still held when it is indexed on the coordinating node
+			bytes += min(counts["coordinating_and_primary"], int64(size))
+		}
+		return bytes > limit
+	}
+	return false
+}
+
+// classifyRejection looks at the status code and the elasticsearch error of a refused request or bulk item,
+// size is the number of bytes of the documents that would be sent again
+func classifyRejection(status int, e interface{}, size int) rejection {
+	fields, _ := e.(map[string]interface{})
+	str := func(key string) string {
+		s, _ := fields[key].(string)
+		return s
+	}
+	switch {
+	case status == 413:
+		return rejection{permanent: true, hint: "the request is larger than http.max_content_length of the target " +
+			"(default 100mb, at most 2gb), raise it in elasticsearch.yml of the target nodes"}
+	case str("type") == "circuit_breaking_exception":
+		return rejection{permanent: str("durability") == "PERMANENT", hint: "a circuit breaker of the target tripped, " +
+			"give the target more heap or raise indices.breaker.total.limit"}
+	case str("type") == "es_rejected_execution_exception" && strings.Contains(str("reason"), "_operation_bytes="):
+		return rejection{permanent: pressureIsPermanent(str("reason"), size), hint: "the documents are over the indexing " +
+			"pressure limit of the target, raise indexing_pressure.memory.limit (default 10% of the heap) in " +
+			"elasticsearch.yml of the target nodes or give them more heap"}
+	}
+	return rejection{}
+}
+
+// requestRejection classifies the error of a whole bulk request of size bytes
+func requestRejection(err error, size int) rejection {
+	var statusErr *HTTPStatusError
+	if !errors.As(err, &statusErr) {
+		return rejection{}
+	}
+	var body struct {
+		Error interface{} `json:"error"`
+	}
+	_ = json.Unmarshal([]byte(statusErr.Body), &body)
+	return classifyRejection(statusErr.Code, body.Error, size)
+}
+
+// describeItem names the document of a bulk item, ie: "index=docs id=42 size=50.0MB"
+func describeItem(item []byte) string {
+	actionLine, _, _ := bytes.Cut(item, []byte{'\n'})
+	action := map[string]Document{}
+	_ = json.Unmarshal(actionLine, &action)
+	for _, doc := range action {
+		return fmt.Sprintf("index=%s id=%s size=%s", doc.Index, doc.Id, formatBytes(int64(len(item))))
+	}
+	return "size=" + formatBytes(int64(len(item)))
+}
+
 // sendBulk sends pending as one bulk request, starting at retry number attempt. A request rejected
 // with 413 or 429 is split in two halves that are sent one after the other, they keep the retries left.
 // It returns the number of successfully indexed items.
@@ -254,14 +356,23 @@ func (m *Migrator) sendBulk(api ESAPI, pending [][]byte, attempt int) int {
 				}
 				return succeeded + m.sendBulk(api, pending[:half], attempt) + m.sendBulk(api, pending[half:], attempt)
 			}
-			if canRetry && isRetryable(err) {
+			rej := requestRejection(err, bulkBytes(pending))
+			// a single document that is over a limit of the target fails again
+			if canRetry && isRetryable(err) && !(len(pending) == 1 && rej.permanent) {
 				wait := backoff(attempt + 1)
 				log.Warnf("bulk request failed, retry %d/%d in %s: %s", attempt+1, m.Config.MaxRetries, wait,
 					SubString(err.Error(), 0, 300))
 				time.Sleep(wait)
 				continue
 			}
-			log.Errorf("bulk request of %d documents failed: %s", len(pending), SubString(err.Error(), 0, 500))
+			if len(pending) == 1 {
+				log.Errorf("failed to index document %s: %s", describeItem(pending[0]), SubString(err.Error(), 0, 500))
+			} else {
+				log.Errorf("bulk request of %d documents failed: %s", len(pending), SubString(err.Error(), 0, 500))
+			}
+			if rej.hint != "" {
+				log.Errorf("hint: %s", rej.hint)
+			}
 			atomic.AddInt64(&m.Stats.Failed, int64(len(pending)))
 			for _, item := range pending {
 				m.Stats.saveFailed(item)
@@ -279,10 +390,20 @@ func (m *Migrator) sendBulk(api ESAPI, pending [][]byte, attempt int) int {
 			for op, action := range response.Items[i] {
 				if action.Status < 300 || (op == "delete" && action.Status == 404) {
 					succeeded++
-				} else if action.Status == 429 && canRetry {
+					continue
+				}
+				rej := classifyRejection(action.Status, action.Error, len(item))
+				if action.Status == 429 && canRetry && !rej.permanent {
 					rejected = append(rejected, item)
 				} else {
-					m.Stats.recordFailure(bulkErrorReason(action))
+					reason := bulkErrorReason(action)
+					if len(item) > largeDocBytes {
+						reason += ", document of " + formatBytes(int64(len(item)))
+					}
+					if rej.hint != "" {
+						reason += ", hint: " + rej.hint
+					}
+					m.Stats.recordFailure(reason)
 					m.Stats.saveFailed(item)
 				}
 			}

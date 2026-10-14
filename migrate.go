@@ -119,7 +119,7 @@ func (m *Migrator) migrateRound(showBar bool) error {
 	var pool *pb.Pool
 	if showBar {
 		var err error
-		if pool, err = pb.StartPool(fetchBar, outputBar); err != nil {
+		if pool, err = stderrConsole.startPool(fetchBar, outputBar); err != nil {
 			log.Warn("can not show progress bars: ", err)
 			showBar = false
 		}
@@ -128,6 +128,7 @@ func (m *Migrator) migrateRound(showBar bool) error {
 		if showBar {
 			outputBar.Finish()
 			pool.Stop()
+			stderrConsole.stopBars()
 		}
 	}()
 

@@ -411,7 +411,7 @@ func (m *Migrator) SyncBetweenIndex(srcEsApi ESAPI, dstEsApi ESAPI, cfg *Config)
 			}
 			log.Infof("src total count=%d", srcScroll.GetHitsTotal())
 			srcBar.SetTotal(int64(srcScroll.GetHitsTotal()))
-			srcBar.Start()
+			stderrConsole.startBar(srcBar)
 		} else if needScrollSrc {
 			start := time.Now()
 			log.Debugf("source index: %s next scroll, source id: %s", cfg.SourceIndexNames, srcScroll.GetScrollId())
@@ -643,6 +643,7 @@ func (m *Migrator) SyncBetweenIndex(srcEsApi ESAPI, dstEsApi ESAPI, cfg *Config)
 	dstEsApi.DeleteScroll(dstScroll.GetScrollId())
 
 	srcBar.Finish()
+	stderrConsole.stopBars()
 	fmt.Println("Source End")
 	//dstBar.FinishPrint("Dest End")
 	//pool.Stop()
