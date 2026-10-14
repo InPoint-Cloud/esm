@@ -357,9 +357,10 @@ Application Options:
                                    indexname, original indexname will be used
                                    if not specified
   -u, --type_override=             override type name
-      --green                      wait for both clusters to be green before
-                                   migrating, otherwise yellow is okay (a red
-                                   cluster is always waited for)
+      --green                      wait for the migrated indexes of both
+                                   clusters to be green before migrating,
+                                   otherwise yellow is okay (a red index is
+                                   always waited for)
   -v, --log=                       setting log
                                    level,options:trace,debug,info,warn,error
                                    (default: INFO)

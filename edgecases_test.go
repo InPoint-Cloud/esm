@@ -260,6 +260,7 @@ func TestWaitForGreen(t *testing.T) {
 	src.addIndex("src", 10)
 	src.health, src.healthCheck = "yellow", 3
 	dst := newFakeES("7.10.2")
+	dst.addIndex("dst", 0)
 	dst.health, dst.healthCheck = "red", 2
 
 	if code := run([]string{"-s", src.start(t), "-d", dst.start(t), "-x", "src", "-y", "dst", "--green"}); code != 0 {
@@ -675,6 +676,7 @@ func TestWaitForRedWithoutGreen(t *testing.T) {
 	src.addIndex("src", 10)
 	src.health, src.healthCheck = "yellow", 3
 	dst := newFakeES("7.10.2")
+	dst.addIndex("dst", 0)
 	dst.health, dst.healthCheck = "red", 2
 
 	if code := run([]string{"-s", src.start(t), "-d", dst.start(t), "-x", "src", "-y", "dst"}); code != 0 {
@@ -687,6 +689,120 @@ func TestWaitForRedWithoutGreen(t *testing.T) {
 		t.Error("did not wait for the red target")
 	}
 	checkDocs(t, values(dst.docs("dst")), 10, "")
+}
+
+// runWithin fails the test if esm does not finish in time, ie: because it waits for a cluster forever
+func runWithin(t *testing.T, args []string) int {
+	t.Helper()
+	done := make(chan int, 1)
+	go func() { done <- run(args) }()
+	select {
+	case code := <-done:
+		return code
+	case <-time.After(10 * time.Second):
+		t.Fatal("esm is still waiting after 10s")
+		return -1
+	}
+}
+
+func TestRedClusterWithGreenIndexes(t *testing.T) {
+	fastRetries(t)
+	for _, targetExists := range []bool{false, true} {
+		t.Run(fmt.Sprintf("target exists %v", targetExists), func(t *testing.T) {
+			src := newFakeES("7.10.2")
+			src.addIndex("src", 10)
+			src.addIndex("broken", 0)
+			src.indexHealth = map[string]string{"broken": "red"}
+			dst := newFakeES("7.10.2")
+			dst.addIndex("other", 0)
+			dst.indexHealth = map[string]string{"other": "red"}
+			if targetExists {
+				dst.addIndex("dst", 0)
+			}
+
+			if code := runWithin(t, []string{"-s", src.start(t), "-d", dst.start(t), "-x", "src", "-y", "dst", "--green"}); code != 0 {
+				t.Fatalf("exit code %d", code)
+			}
+			checkDocs(t, values(dst.docs("dst")), 10, "")
+			src.mu.Lock()
+			defer src.mu.Unlock()
+			dst.mu.Lock()
+			defer dst.mu.Unlock()
+			if want := []string{"/_cluster/health/src"}; !reflect.DeepEqual(src.healthPaths, want) {
+				t.Errorf("source health requests %v, want %v", src.healthPaths, want)
+			}
+			if want := []string{"/_cluster/health/dst"}; !reflect.DeepEqual(dst.healthPaths, want) {
+				t.Errorf("target health requests %v, want %v", dst.healthPaths, want)
+			}
+		})
+	}
+}
+
+func TestWaitForRedIndex(t *testing.T) {
+	fastRetries(t)
+	src := newFakeES("7.10.2")
+	src.addIndex("a", 5)
+	src.addIndex("b", 5)
+	dst := newFakeES("7.10.2")
+	dst.addIndex("b", 0)
+	srcURL, dstURL := src.start(t), dst.start(t)
+
+	// the target index turns green while esm waits for it, the migration must not start before
+	dst.mu.Lock()
+	dst.indexHealth = map[string]string{"b": "red"}
+	dst.mu.Unlock()
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		dst.mu.Lock()
+		dst.indexHealth = nil
+		dst.mu.Unlock()
+	}()
+
+	// without --dest_index the source names are checked on the target, "a" does not exist there yet
+	if code := runWithin(t, []string{"-s", srcURL, "-d", dstURL, "-x", "a,b"}); code != 0 {
+		t.Fatalf("exit code %d", code)
+	}
+	dst.mu.Lock()
+	defer dst.mu.Unlock()
+	if len(dst.healthPaths) < 3 {
+		t.Errorf("did not wait for the red target index: %v", dst.healthPaths)
+	}
+	for _, p := range dst.healthPaths {
+		if p != "/_cluster/health/a" && p != "/_cluster/health/b" {
+			t.Errorf("unexpected health request %s", p)
+		}
+	}
+}
+
+func TestClusterReady(t *testing.T) {
+	es := newFakeES("7.10.2")
+	es.addIndex("green", 0)
+	es.addIndex("yellow", 0)
+	es.addIndex("red", 0)
+	es.indexHealth = map[string]string{"yellow": "yellow", "red": "red"}
+	api := &ESAPIV0{Host: es.start(t)}
+
+	for _, tc := range []struct {
+		indexes, status, index string
+		green, ready           bool
+	}{
+		{"green", "green", "green", true, true},
+		{"green,yellow", "yellow", "yellow", false, true},
+		{"green,yellow", "yellow", "yellow", true, false},
+		{"green, red ,yellow", "red", "red", false, false},
+		{"missing", "missing", "", true, true},
+		{"missing,yellow", "yellow", "yellow", true, false},
+		{"gr*", "green", "gr*", true, true},
+		{"", "red", "", false, false},
+		{"_all", "red", "_all", false, false},
+	} {
+		m := &Migrator{Config: &Config{WaitForGreen: tc.green}}
+		health, ready := m.ClusterReady(api, tc.indexes)
+		if health.Status != tc.status || health.Index != tc.index || ready != tc.ready {
+			t.Errorf("%q --green=%v: %s %q ready %v, want %s %q ready %v", tc.indexes, tc.green,
+				health.Status, health.Index, ready, tc.status, tc.index, tc.ready)
+		}
+	}
 }
 
 func TestRequestTimeout(t *testing.T) {

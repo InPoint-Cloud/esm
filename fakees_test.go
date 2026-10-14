@@ -33,8 +33,10 @@ type fakeES struct {
 	auth         string // required Authorization header
 	health       string // cluster health status of the next healthChecks requests, then green
 	healthCheck  int
-	sorts        []string // the sort of every new scroll, "" without one
-	dataNodes    int      // number_of_data_nodes of the cluster health
+	indexHealth  map[string]string // health of single indexes, green if not set
+	healthPaths  []string          // the path of every health request, ie: /_cluster/health/idx
+	sorts        []string          // the sort of every new scroll, "" without one
+	dataNodes    int               // number_of_data_nodes of the cluster health
 	// persistent cluster settings, ie: indices.id_field_data.enabled
 	clusterSettings map[string]interface{}
 	// http.max_content_length set on the nodes, "" for the default
@@ -181,11 +183,30 @@ func (f *fakeES) handle(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case r.URL.Path == "/":
 		reply(200, map[string]interface{}{"version": map[string]string{"number": f.version}})
-	case r.URL.Path == "/_cluster/health":
+	case len(parts) >= 2 && parts[0] == "_cluster" && parts[1] == "health":
+		f.healthPaths = append(f.healthPaths, r.URL.Path)
+		pattern := "_all"
+		if len(parts) > 2 {
+			pattern = parts[2]
+		}
+		// like elasticsearch, waiting for an index that does not exist times out
+		for _, name := range strings.Split(pattern, ",") {
+			if _, ok := f.indices[name]; !ok && name != "_all" && !strings.ContainsAny(name, "*?") {
+				reply(408, map[string]interface{}{"cluster_name": "fake", "status": "red", "timed_out": true})
+				return
+			}
+		}
 		health := "green"
+		for name, status := range f.indexHealth {
+			if _, ok := f.indices[name]; ok && matchesAny(pattern, name) && healthRank[status] > healthRank[health] {
+				health = status
+			}
+		}
 		if f.healthCheck > 0 {
 			f.healthCheck--
-			health = f.health
+			if healthRank[f.health] > healthRank[health] {
+				health = f.health
+			}
 		}
 		reply(200, map[string]interface{}{"cluster_name": "fake", "status": health, "number_of_data_nodes": max(f.dataNodes, 1)})
 	case r.URL.Path == "/_cluster/settings":

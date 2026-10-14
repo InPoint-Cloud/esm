@@ -180,10 +180,39 @@ func (m *Migrator) targetIsTypeless() bool {
 	return m.TargetESAPI != nil && majorVersion(m.TargetESAPI.ClusterVersion()) >= 8
 }
 
-// ClusterReady returns true when the cluster is green, or yellow without --green. An unreachable cluster
-// is only waited for with --green.
-func (m *Migrator) ClusterReady(api ESAPI) (*ClusterHealth, bool) {
-	health := api.ClusterHealth()
+// healthRank orders the health states from good to bad, the worst index decides whether a cluster is ready
+var healthRank = map[string]int{"green": 0, "yellow": 1, "unreachable": 2, "red": 3}
+
+// ClusterReady returns true when the given comma separated indexes are green, or yellow without --green, so a
+// red index that is not migrated does not block the migration. Indexes that do not exist yet are skipped,
+// without index names the health of the whole cluster is checked. An unreachable cluster is only waited for
+// with --green.
+func (m *Migrator) ClusterReady(api ESAPI, indexNames string) (*ClusterHealth, bool) {
+	var names []string
+	for _, name := range strings.Split(indexNames, ",") {
+		if name = strings.TrimSpace(name); name != "" {
+			names = append(names, name)
+		}
+	}
+	if len(names) == 0 {
+		names = []string{""}
+	}
+
+	var health *ClusterHealth
+	for _, name := range names {
+		h := api.ClusterHealth(name)
+		if h.Status == "missing" {
+			log.Debugf("index %s does not exist yet, skipping its health", name)
+			continue
+		}
+		h.Index = name
+		if health == nil || healthRank[h.Status] > healthRank[health.Status] {
+			health = h
+		}
+	}
+	if health == nil {
+		return &ClusterHealth{Status: "missing"}, true
+	}
 
 	switch health.Status {
 	case "green":
