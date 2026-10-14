@@ -2,7 +2,7 @@
 
 The section of a release is used as the description of its GitHub release.
 
-## Unreleased
+## v0.12.1
 
 ### Changed
 - A document that is over a size limit of the target is no longer retried: a 413, an indexing pressure
