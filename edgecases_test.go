@@ -469,6 +469,92 @@ func TestBulkTooLarge(t *testing.T) {
 	})
 }
 
+func TestDocumentOverIndexingPressureLimit(t *testing.T) {
+	fastRetries(t)
+	src := newFakeES("8.15.0")
+	src.addIndex("idx", 20)
+	big := fmt.Sprintf(`{"n":20,"text":"%s"}`, strings.Repeat("x", 200*1024))
+	src.mu.Lock()
+	src.putDoc("idx", "0020", "_doc", big)
+	src.mu.Unlock()
+	dst := newFakeES("8.15.0")
+	dst.addIndex("idx", 0)
+	dst.indexingPressureLimit = 100 * 1024
+
+	var bigRequests int32
+	dstURL := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/_bulk" && r.ContentLength > int64(len(big)) && r.ContentLength < int64(len(big))+60 {
+			atomic.AddInt32(&bigRequests, 1)
+		}
+		dst.handle(w, r)
+	}))
+	t.Cleanup(dstURL.Close)
+
+	failed := filepath.Join(t.TempDir(), "failed.json")
+	if code := run([]string{"-s", src.start(t), "-d", dstURL.URL, "-x", "idx", "--sync", "-c", "300", "--failed_output", failed}); code != 1 {
+		t.Fatalf("exit code %d, want 1", code)
+	}
+	if got := len(dst.docs("idx")); got != 20 {
+		t.Errorf("target has %d documents, want the 20 small ones", got)
+	}
+	// the document alone is over the limit, it is not retried
+	if n := atomic.LoadInt32(&bigRequests); n != 1 {
+		t.Errorf("the large document was sent %d times on its own, want 1", n)
+	}
+	// the line is too long for readLines
+	out, err := os.ReadFile(failed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lines := strings.Split(strings.TrimSpace(string(out)), "\n"); len(lines) != 1 || !strings.Contains(lines[0], `"_id":"0020"`) {
+		t.Errorf("failed output = %d lines, want the large document", len(lines))
+	}
+}
+
+func TestClassifyRejection(t *testing.T) {
+	pressure := func(op string, size, limit int) map[string]interface{} {
+		return map[string]interface{}{"type": "es_rejected_execution_exception", "reason": fmt.Sprintf(
+			"rejected execution of %s operation [coordinating_and_primary_bytes=0, replica_bytes=0, all_bytes=0, "+
+				"%s_operation_bytes=%d, max_coordinating_and_primary_bytes=%d]", op, op, size, limit)}
+	}
+	for _, tc := range []struct {
+		name      string
+		status    int
+		err       interface{}
+		permanent bool
+		hint      string
+	}{
+		{"too large for http", 413, nil, true, "http.max_content_length"},
+		{"coordinating over limit", 429, pressure("coordinating", 60, 50), true, "indexing_pressure.memory.limit"},
+		{"coordinating busy", 429, pressure("coordinating", 40, 50), false, "indexing_pressure.memory.limit"},
+		{"primary over limit", 429, pressure("primary", 60, 50), true, "indexing_pressure.memory.limit"},
+		{"replica over limit", 429, map[string]interface{}{"type": "es_rejected_execution_exception",
+			"reason": "rejected execution of replica operation [replica_bytes=0, replica_operation_bytes=80, max_replica_bytes=75]"},
+			true, "indexing_pressure.memory.limit"},
+		{"primary with its coordinating bytes over limit", 429, map[string]interface{}{"type": "es_rejected_execution_exception",
+			"reason": "rejected execution of primary operation [coordinating_and_primary_bytes=51748375, replica_bytes=0, " +
+				"all_bytes=51748375, primary_operation_bytes=206991772, max_primary_bytes=214748364]"}, true, "indexing_pressure.memory.limit"},
+		{"primary busy", 429, map[string]interface{}{"type": "es_rejected_execution_exception",
+			"reason": "rejected execution of primary operation [coordinating_and_primary_bytes=200000000, replica_bytes=0, " +
+				"all_bytes=200000000, primary_operation_bytes=1000, max_primary_bytes=214748364]"}, false, "indexing_pressure.memory.limit"},
+		{"breaker transient", 429, map[string]interface{}{"type": "circuit_breaking_exception", "durability": "TRANSIENT"}, false, "indices.breaker"},
+		{"breaker permanent", 429, map[string]interface{}{"type": "circuit_breaking_exception", "durability": "PERMANENT"}, true, "indices.breaker"},
+		{"write queue full", 429, map[string]interface{}{"type": "es_rejected_execution_exception",
+			"reason": "rejected execution of TimedRunnable on EsThreadPoolExecutor[name = node/write, queue capacity = 10000]"}, false, ""},
+		{"mapping error", 400, map[string]interface{}{"type": "mapper_parsing_exception"}, false, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rej := classifyRejection(tc.status, tc.err, 51748375)
+			if rej.permanent != tc.permanent {
+				t.Errorf("permanent = %t, want %t", rej.permanent, tc.permanent)
+			}
+			if tc.hint == "" && rej.hint != "" || !strings.Contains(rej.hint, tc.hint) {
+				t.Errorf("hint = %q, want it to name %q", rej.hint, tc.hint)
+			}
+		})
+	}
+}
+
 func TestInterruptRestoresSettings(t *testing.T) {
 	self, err := os.FindProcess(os.Getpid())
 	if err != nil || runtime.GOOS == "windows" {

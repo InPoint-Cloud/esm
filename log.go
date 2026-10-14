@@ -14,13 +14,13 @@ func setupLogging(level string, logFile string) (func(), error) {
 		return nil, err
 	}
 	if logFile == "" {
-		log.Setup(os.Stderr, lvl)
+		log.Setup(stderrConsole, lvl)
 		return func() {}, nil
 	}
 	f, err := os.OpenFile(logFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {
 		return nil, err
 	}
-	log.Setup(io.MultiWriter(os.Stderr, f), lvl)
+	log.Setup(io.MultiWriter(stderrConsole, f), lvl)
 	return func() { f.Close() }, nil
 }

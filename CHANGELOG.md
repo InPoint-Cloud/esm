@@ -2,6 +2,22 @@
 
 The section of a release is used as the description of its GitHub release.
 
+## Unreleased
+
+### Changed
+- A document that is over a size limit of the target is no longer retried: a 413, an indexing pressure
+  rejection (429 `es_rejected_execution_exception`) that would repeat when the document is sent on its own,
+  or a circuit breaker that reports `PERMANENT` durability fails it right away and saves it to `--failed_output`.
+  Elasticsearch 9 counts a primary operation at about 4 times the document size, a 50mb document needs an
+  `indexing_pressure.memory.limit` of about 260mb.
+- A failed document is logged with its index, id and size, and a hint names the Elasticsearch setting
+  to raise (`http.max_content_length`, `indexing_pressure.memory.limit`, `indices.breaker.total.limit`).
+
+### Fixed
+- Log lines written while the progress bars were shown were partly overwritten by the next redraw of the
+  bars, which left copies of the bars behind ("Read 6 / 6" many times). A log line is now printed in place
+  of the bars and the bars are drawn again below it.
+
 ## v0.12.0
 
 ### Added
