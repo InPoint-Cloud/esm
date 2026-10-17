@@ -5,7 +5,7 @@ go 1.26.0
 require (
 	github.com/cheggaaa/pb/v3 v3.2.1
 	github.com/jessevdk/go-flags v1.6.1
-	github.com/mattn/go-colorable v0.1.15
+	github.com/mattn/go-colorable v0.1.16
 	github.com/mattn/go-isatty v0.0.24
 )
 
